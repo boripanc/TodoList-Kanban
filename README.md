@@ -30,7 +30,7 @@ Without a database the app runs on this device only. To turn on accounts and sha
 
 1. Copy `.env.example` to `.env.local` and set `DATABASE_URL` to your Postgres connection string.
 2. Run `npm run dev` and open http://localhost:5173. It starts the app and its server together; on the first run the server creates its tables in a **`kanban` schema**, so it can share a database with other applications and leaves their tables alone.
-3. A **Sign in** button appears in the top bar. If it doesn't, check the terminal: without `DATABASE_URL` it says accounts are off, and a database error stops the server with the reason.
+3. The app opens on a **Sign in** page; nobody can use it without an account while accounts are on. If you see the board instead, check the terminal: without `DATABASE_URL` it says accounts are off, and a database error stops the server with the reason.
 
 To run it as one thing, `npm run build` then `npm run server`: the server also serves the built app, by default on http://localhost:8787.
 
@@ -40,7 +40,7 @@ How it works:
 - **Roles**: each shared board has one **owner** (invites people, changes roles, removes people, deletes the board), **editors** (change everything on the board) and **viewers** (read only). The server checks every request against these roles.
 - **Invites by email**: the person sees the invitation once they sign in with that address, and can accept or decline. The app does not send an email for it, so let them know.
 - **Invite links**: anyone with the link can join with the link's role after signing in, until the owner turns the link off.
-- **Device boards**: boards made while signed out stay on the device. Use **Share board…** and **Move to my account** to upload one. Signing out removes account boards from the device; they come back on sign-in.
+- **Device boards**: boards made before accounts were turned on stay on the device and show up after signing in, under "On this device". Use **Share board…** and **Move to my account** to upload one. Signing out returns to the sign-in page and removes account boards from the device; they come back on sign-in.
 - **Live updates**: Postgres `LISTEN`/`NOTIFY` feeds a stream of events to each browser, so changes appear for other members within a moment. Edits to different cards merge; if two people change the same card at once, the last save wins.
 
 ### Settings

@@ -6,7 +6,8 @@ import { Modal } from './Modal'
 
 type InviteRole = Exclude<Role, 'owner'>
 
-export function SignInDialog({ cloud, reason, onClose }: { cloud: Cloud; reason?: string; onClose: () => void }) {
+/** Shown instead of the app until someone signs in, when accounts are on. */
+export function SignInPage({ cloud }: { cloud: Cloud }) {
   const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -20,7 +21,6 @@ export function SignInDialog({ cloud, reason, onClose }: { cloud: Cloud; reason?
     setError(null)
     try {
       await (signingUp ? cloud.signUp : cloud.signIn)(email.trim(), password)
-      onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not sign in.')
       setBusy(false)
@@ -29,21 +29,24 @@ export function SignInDialog({ cloud, reason, onClose }: { cloud: Cloud; reason?
 
   const title = signingUp ? 'Create an account' : 'Sign in'
   return (
-    <Modal title={title} onClose={onClose}>
-      <h2>{title}</h2>
-      <form className="stack" onSubmit={submit}>
+    <main className="sign-in-page" aria-label={title}>
+      <form className="sign-in-card stack" onSubmit={submit}>
+        <p className="sign-in-brand" aria-hidden>
+          ▦ TodoList Kanban
+        </p>
+        <h1>{title}</h1>
         <p className="muted">
-          {reason ??
-            'Sign in to keep boards in your account, use them on any device, and share them with other people.'}{' '}
-          Boards you made without signing in stay on this device.
+          {cloud.pendingJoin
+            ? 'Sign in to join the board you were invited to.'
+            : 'Sign in to see your boards and the boards shared with you.'}
         </p>
         <label className="field">
           <span>Email</span>
           <input
             type="email"
             required
+            autoFocus
             autoComplete="email"
-            data-autofocus
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
@@ -82,7 +85,7 @@ export function SignInDialog({ cloud, reason, onClose }: { cloud: Cloud; reason?
           </button>
         </div>
       </form>
-    </Modal>
+    </main>
   )
 }
 

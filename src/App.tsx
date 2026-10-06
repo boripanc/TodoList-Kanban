@@ -12,7 +12,7 @@ import { FilterBar } from './components/FilterBar'
 import { LabelManager } from './components/LabelEditor'
 import { Menu } from './components/Menu'
 import { Modal } from './components/Modal'
-import { InvitesDialog, ShareDialog, SignInDialog } from './components/Sharing'
+import { InvitesDialog, ShareDialog } from './components/Sharing'
 import { roleName } from './cloud/api'
 import { useCloud } from './cloud/context'
 import { isReadOnly } from './state/reducer'
@@ -24,10 +24,9 @@ export default function App() {
     filter: emptyFilter,
   })
   const [showFilters, setShowFilters] = useState(false)
-  const [joinDismissed, setJoinDismissed] = useState(false)
   const [openCardId, setOpenCardId] = useState<string | null>(null)
   const [dialog, setDialog] = useState<
-    'new-board' | 'labels' | 'shortcuts' | 'share' | 'sign-in' | 'invites' | null
+    'new-board' | 'labels' | 'shortcuts' | 'share' | 'invites' | null
   >(null)
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -141,11 +140,6 @@ export default function App() {
         )}
 
         <div className="topbar-end">
-          {cloud && cloud.user === null && (
-            <button className="button" onClick={() => setDialog('sign-in')}>
-              Sign in
-            </button>
-          )}
           {cloud?.user && (
             <Menu
               label={`Account: ${cloud.user.email}`}
@@ -180,7 +174,7 @@ export default function App() {
                 ? [
                     {
                       label: role && role !== 'owner' ? 'Members…' : 'Share board…',
-                      onSelect: () => setDialog(signedIn ? 'share' : 'sign-in'),
+                      onSelect: () => setDialog('share'),
                     },
                   ]
                 : []),
@@ -312,16 +306,6 @@ export default function App() {
           <h2>Labels</h2>
           <LabelManager board={board} />
         </Modal>
-      )}
-      {cloud && (dialog === 'sign-in' || (cloud.pendingJoin && !joinDismissed && dialog === null)) && (
-        <SignInDialog
-          cloud={cloud}
-          reason={cloud.pendingJoin ? 'Sign in to join the board you were invited to.' : undefined}
-          onClose={() => {
-            setDialog(null)
-            setJoinDismissed(true)
-          }}
-        />
       )}
       {cloud && dialog === 'share' && board && (
         <ShareDialog cloud={cloud} board={board} onClose={() => setDialog(null)} />
