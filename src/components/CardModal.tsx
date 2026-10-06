@@ -10,7 +10,17 @@ import { priorityLabel } from '../lib/priority'
 
 const priorities: Priority[] = ['none', 'low', 'medium', 'high', 'urgent']
 
-export function CardModal({ board, card, onClose }: { board: Board; card: Card; onClose: () => void }) {
+export function CardModal({
+  board,
+  card,
+  onClose,
+  readOnly = false,
+}: {
+  board: Board
+  card: Card
+  onClose: () => void
+  readOnly?: boolean
+}) {
   const { state, dispatch } = useStore()
   const [newItem, setNewItem] = useState('')
   const [title, setTitle] = useState(card.title)
@@ -51,8 +61,8 @@ export function CardModal({ board, card, onClose }: { board: Board; card: Card; 
   const progress = card.checklist.length ? Math.round((doneCount / card.checklist.length) * 100) : 0
 
   return (
-    <Modal title={`Edit card: ${card.title}`} onClose={close} wide>
-      <div className="card-editor">
+    <Modal title={`${readOnly ? 'Card' : 'Edit card'}: ${card.title}`} onClose={close} wide>
+      <fieldset className="card-editor" disabled={readOnly}>
         <input
           className="card-editor-title"
           value={title}
@@ -192,29 +202,31 @@ export function CardModal({ board, card, onClose }: { board: Board; card: Card; 
               <NewLabelForm board={board} onCreated={(id) => update({ labelIds: [...card.labelIds, id] })} />
             </div>
 
-            <div className="card-editor-actions">
-              <button
-                className="button"
-                onClick={() => {
-                  commitText()
-                  dispatch({ type: 'card/duplicate', cardId: card.id, newId: createId(), now: Date.now() })
-                  onClose()
-                }}
-              >
-                Duplicate
-              </button>
-              <button
-                className="button danger"
-                onClick={() => {
-                  if (window.confirm(`Delete "${card.title}"?`)) {
-                    dispatch({ type: 'card/delete', cardId: card.id })
+            {!readOnly && (
+              <div className="card-editor-actions">
+                <button
+                  className="button"
+                  onClick={() => {
+                    commitText()
+                    dispatch({ type: 'card/duplicate', cardId: card.id, newId: createId(), now: Date.now() })
                     onClose()
-                  }
-                }}
-              >
-                Delete
-              </button>
-            </div>
+                  }}
+                >
+                  Duplicate
+                </button>
+                <button
+                  className="button danger"
+                  onClick={() => {
+                    if (window.confirm(`Delete "${card.title}"?`)) {
+                      dispatch({ type: 'card/delete', cardId: card.id })
+                      onClose()
+                    }
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            )}
             <p className="muted small">
               Created {new Date(card.createdAt).toLocaleString()}
               <br />
@@ -222,7 +234,7 @@ export function CardModal({ board, card, onClose }: { board: Board; card: Card; 
             </p>
           </aside>
         </div>
-      </div>
+      </fieldset>
     </Modal>
   )
 }

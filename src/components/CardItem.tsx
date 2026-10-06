@@ -61,12 +61,14 @@ interface CardItemProps {
   card: Card
   labels: Label[]
   onOpen: (cardId: string) => void
+  readOnly?: boolean
 }
 
-export function CardItem({ card, labels, onOpen }: CardItemProps) {
+export function CardItem({ card, labels, onOpen, readOnly = false }: CardItemProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
     data: { type: 'card' },
+    disabled: readOnly,
   })
 
   return (

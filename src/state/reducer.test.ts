@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { initialState, reducer, type Action } from './reducer'
 import { addBoardAction } from './storage'
 import type { AppState } from '../types'
+import { extractBoardDoc } from '../cloud/doc'
 
 const now = 1_700_000_000_000
 
@@ -153,5 +154,88 @@ describe('labels', () => {
     )
     expect(state.cards.c.labelIds).toEqual([])
     expect(state.boards[board.id].labels.some((l) => l.id === bug)).toBe(false)
+  })
+})
+
+describe('shared boards', () => {
+  function sharedBoard(role: 'owner' | 'editor' | 'viewer') {
+    const { state, board } = workBoard()
+    const withCard = run(state, { type: 'card/add', columnId: board.columnIds[0], id: 'c1', title: 'Task', now })
+    const doc = extractBoardDoc(withCard, board.id)!
+    return { doc, state: reducer(initialState, { type: 'board/load', doc, role }), board }
+  }
+
+  it('loads a board from the cloud and replaces it on reload', () => {
+    const { doc, state, board } = sharedBoard('editor')
+    expect(state.boards[board.id].cloud).toEqual({ role: 'editor' })
+    expect(state.activeBoardId).toBe(board.id)
+    expect(state.cards.c1.title).toBe('Task')
+
+    const changed = {
+      ...doc,
+      columns: doc.columns.map((c, i) => (i === 0 ? { ...c, cardIds: [] } : c)),
+      cards: [],
+    }
+    const next = reducer(state, { type: 'board/load', doc: changed, role: 'viewer' })
+    expect(next.cards.c1).toBeUndefined()
+    expect(next.boards[board.id].cloud).toEqual({ role: 'viewer' })
+    expect(next.boardOrder).toEqual([board.id])
+  })
+
+  it('stops viewers from changing anything', () => {
+    const { state, board } = sharedBoard('viewer')
+    const col = board.columnIds[0]
+    const attempts: Action[] = [
+      { type: 'board/rename', boardId: board.id, title: 'Mine now' },
+      { type: 'column/add', boardId: board.id, id: 'x', title: 'X' },
+      { type: 'column/update', columnId: col, patch: { title: 'Renamed' } },
+      { type: 'card/add', columnId: col, id: 'c2', title: 'New' },
+      { type: 'card/update', cardId: 'c1', patch: { title: 'Edited' }, now },
+      { type: 'card/move', cardId: 'c1', toColumnId: board.columnIds[1], toIndex: 0 },
+      { type: 'card/delete', cardId: 'c1' },
+      { type: 'label/delete', boardId: board.id, labelId: board.labels[0].id },
+    ].map((a) => ({ now, ...a }) as Action)
+    for (const action of attempts) expect(reducer(state, action)).toBe(state)
+    expect(reducer(state, { type: 'board/select', boardId: board.id }).activeBoardId).toBe(board.id)
+  })
+
+  it('lets editors change shared boards', () => {
+    const { state } = sharedBoard('editor')
+    expect(reducer(state, { type: 'card/update', cardId: 'c1', patch: { title: 'Edited' }, now }).cards.c1.title).toBe(
+      'Edited',
+    )
+  })
+
+  it('unloads one cloud board, or all of them on sign-out, keeping device boards', () => {
+    const { state: shared, board } = sharedBoard('owner')
+    let state = reducer(shared, addBoardAction('Home', 'personal', now))
+    const home = state.activeBoardId!
+    expect(reducer(state, { type: 'board/unload', boardId: board.id }).boardOrder).toEqual([home])
+    state = reducer(state, { type: 'cloud/clear' })
+    expect(state.boardOrder).toEqual([home])
+    expect(state.cards.c1).toBeUndefined()
+  })
+
+  it('marks a device board as an account board and back', () => {
+    const { state, board } = workBoard()
+    const moved = reducer(state, { type: 'board/setCloud', boardId: board.id, role: 'owner' })
+    expect(moved.boards[board.id].cloud).toEqual({ role: 'owner' })
+    expect(reducer(moved, { type: 'board/setCloud', boardId: board.id, role: null }).boards[board.id]).not.toHaveProperty(
+      'cloud',
+    )
+  })
+
+  it('keeps account boards when a backup replaces device boards', () => {
+    const { state: shared, board } = sharedBoard('editor')
+    const backup = reducer(initialState, addBoardAction('From backup', 'blank', now))
+    const state = reducer(shared, { type: 'state/replace', state: backup })
+    expect(state.boardOrder).toEqual([backup.boardOrder[0], board.id])
+    expect(state.boards[board.id].cloud).toEqual({ role: 'editor' })
+    expect(state.activeBoardId).toBe(backup.boardOrder[0])
+
+    // A backup that contains the account board itself does not overwrite it.
+    const again = reducer(state, { type: 'state/replace', state: { ...shared, activeBoardId: null } })
+    expect(again.boardOrder).toEqual([board.id])
+    expect(again.boards[board.id].cloud).toEqual({ role: 'editor' })
   })
 })

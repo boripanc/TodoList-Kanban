@@ -5,6 +5,8 @@ import type { Action } from './reducer'
 export interface Store {
   state: AppState
   dispatch: Dispatch<Action>
+  /** The state including actions dispatched since the last render. */
+  getState: () => AppState
 }
 
 export const StoreContext = createContext<Store | null>(null)

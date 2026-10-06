@@ -1,4 +1,5 @@
-import type { AppState, Board, Card, Column, Label } from '../types'
+import type { AppState, Board, Card, Column, Label, Role } from '../types'
+import { extractBoardDoc, type BoardDoc } from '../cloud/doc'
 import { templateColumns, templateLabels, type BoardTemplate } from './templates'
 
 export type Action =
@@ -20,6 +21,14 @@ export type Action =
   | { type: 'card/duplicate'; cardId: string; newId: string; now: number }
   | { type: 'card/move'; cardId: string; toColumnId: string; toIndex: number }
   | { type: 'state/replace'; state: AppState }
+  /** Put a board fetched from the cloud in place of the local copy, or add it. */
+  | { type: 'board/load'; doc: BoardDoc; role: Role }
+  /** Drop a cloud board from this device (left, removed, or deleted elsewhere). */
+  | { type: 'board/unload'; boardId: string }
+  /** Mark a board as living in the account (`role`) or on this device only (null). */
+  | { type: 'board/setCloud'; boardId: string; role: Role | null }
+  /** Drop every cloud board, e.g. on sign-out. */
+  | { type: 'cloud/clear' }
 
 export const initialState: AppState = {
   version: 1,
@@ -45,7 +54,58 @@ export function findColumnOfCard(state: AppState, cardId: string): Column | unde
   return Object.values(state.columns).find((column) => column.cardIds.includes(cardId))
 }
 
+function removeBoard(state: AppState, boardId: string): AppState {
+  const board = state.boards[boardId]
+  if (!board) return state
+  const cardIds = board.columnIds.flatMap((id) => state.columns[id]?.cardIds ?? [])
+  const boardOrder = state.boardOrder.filter((id) => id !== board.id)
+  const activeBoardId = state.activeBoardId === board.id ? (boardOrder[0] ?? null) : state.activeBoardId
+  return {
+    ...state,
+    boardOrder,
+    activeBoardId,
+    boards: omit(state.boards, [board.id]),
+    columns: omit(state.columns, board.columnIds),
+    cards: omit(state.cards, cardIds),
+  }
+}
+
+/** The board an action edits, if it edits one. */
+function targetBoardId(state: AppState, action: Action): string | undefined {
+  switch (action.type) {
+    case 'board/rename':
+    case 'label/add':
+    case 'label/update':
+    case 'label/delete':
+    case 'column/add':
+    case 'column/delete':
+    case 'column/move':
+      return action.boardId
+    case 'column/update':
+    case 'column/clear':
+    case 'card/add':
+      return Object.values(state.boards).find((b) => b.columnIds.includes(action.columnId))?.id
+    case 'card/update':
+    case 'card/delete':
+    case 'card/duplicate':
+    case 'card/move': {
+      const column = findColumnOfCard(state, action.cardId)
+      return column && Object.values(state.boards).find((b) => b.columnIds.includes(column.id))?.id
+    }
+    default:
+      return undefined
+  }
+}
+
+export function isReadOnly(board: Board | undefined): boolean {
+  return board?.cloud?.role === 'viewer'
+}
+
 export function reducer(state: AppState, action: Action): AppState {
+  // Viewers of a shared board can look but not change anything.
+  const target = targetBoardId(state, action)
+  if (target && isReadOnly(state.boards[target])) return state
+
   switch (action.type) {
     case 'board/add': {
       // `ids` supplies pre-generated ids: first for columns, then for labels.
@@ -80,22 +140,9 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, boards: { ...state.boards, [board.id]: { ...board, title } } }
     }
 
-    case 'board/delete': {
-      const board = state.boards[action.boardId]
-      if (!board) return state
-      const cardIds = board.columnIds.flatMap((id) => state.columns[id]?.cardIds ?? [])
-      const boardOrder = state.boardOrder.filter((id) => id !== board.id)
-      const activeBoardId =
-        state.activeBoardId === board.id ? (boardOrder[0] ?? null) : state.activeBoardId
-      return {
-        ...state,
-        boardOrder,
-        activeBoardId,
-        boards: omit(state.boards, [board.id]),
-        columns: omit(state.columns, board.columnIds),
-        cards: omit(state.cards, cardIds),
-      }
-    }
+    case 'board/delete':
+    case 'board/unload':
+      return removeBoard(state, action.boardId)
 
     case 'board/select':
       if (!state.boards[action.boardId]) return state
@@ -301,7 +348,59 @@ export function reducer(state: AppState, action: Action): AppState {
       }
     }
 
-    case 'state/replace':
-      return action.state
+    case 'state/replace': {
+      // Importing a backup replaces the boards on this device. Account boards
+      // stay as they are; boards in the backup come back as device-only copies.
+      const cloudIds = state.boardOrder.filter((id) => state.boards[id]?.cloud)
+      let next = cloudIds.reduce((acc, id) => removeBoard(acc, id), action.state)
+      next = {
+        ...next,
+        boards: Object.fromEntries(
+          Object.entries(next.boards).map(([id, board]) => {
+            const { cloud: _cloud, ...rest } = board
+            return [id, rest]
+          }),
+        ),
+      }
+      for (const id of cloudIds) {
+        const doc = extractBoardDoc(state, id)!
+        next = reducer(next, { type: 'board/load', doc, role: state.boards[id].cloud!.role })
+      }
+      return { ...next, activeBoardId: action.state.activeBoardId ?? next.activeBoardId }
+    }
+
+    case 'board/load': {
+      const { doc } = action
+      const existing = state.boards[doc.board.id]
+      const base = existing ? removeBoard(state, doc.board.id) : state
+      const columns = { ...base.columns }
+      for (const column of doc.columns) columns[column.id] = column
+      const cards = { ...base.cards }
+      for (const card of doc.cards) cards[card.id] = card
+      const boardOrder = existing
+        ? state.boardOrder
+        : [...state.boardOrder.filter((id) => id !== doc.board.id), doc.board.id]
+      return {
+        ...base,
+        boards: { ...base.boards, [doc.board.id]: { ...doc.board, cloud: { role: action.role } } },
+        columns,
+        cards,
+        boardOrder,
+        activeBoardId: existing ? state.activeBoardId : (state.activeBoardId ?? doc.board.id),
+      }
+    }
+
+    case 'board/setCloud': {
+      const board = state.boards[action.boardId]
+      if (!board) return state
+      const { cloud: _cloud, ...rest } = board
+      const next: Board = action.role ? { ...rest, cloud: { role: action.role } } : rest
+      return { ...state, boards: { ...state.boards, [board.id]: next } }
+    }
+
+    case 'cloud/clear':
+      return state.boardOrder
+        .filter((id) => state.boards[id]?.cloud)
+        .reduce((acc, id) => removeBoard(acc, id), state)
   }
 }

@@ -33,12 +33,16 @@ export interface Column {
   wipLimit: number
 }
 
+export type Role = 'owner' | 'editor' | 'viewer'
+
 export interface Board {
   id: string
   title: string
   columnIds: string[]
   labels: Label[]
   createdAt: number
+  /** Set when the board lives in an account (and may be shared); absent for boards kept on this device only. */
+  cloud?: { role: Role }
 }
 
 export interface AppState {

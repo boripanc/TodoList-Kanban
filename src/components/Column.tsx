@@ -14,9 +14,10 @@ interface ColumnProps {
   totalCount: number
   labels: Label[]
   onOpenCard: (cardId: string) => void
+  readOnly?: boolean
 }
 
-export function Column({ boardId, column, cards, totalCount, labels, onOpenCard }: ColumnProps) {
+export function Column({ boardId, column, cards, totalCount, labels, onOpenCard, readOnly = false }: ColumnProps) {
   const { dispatch } = useStore()
   const [editingTitle, setEditingTitle] = useState(false)
   const [composing, setComposing] = useState(false)
@@ -25,7 +26,7 @@ export function Column({ boardId, column, cards, totalCount, labels, onOpenCard 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: column.id,
     data: { type: 'column' },
-    disabled: editingTitle,
+    disabled: editingTitle || readOnly,
   })
 
   const overLimit = column.wipLimit > 0 && totalCount > column.wipLimit
@@ -66,7 +67,11 @@ export function Column({ boardId, column, cards, totalCount, labels, onOpenCard 
             onBlur={(e) => rename(e.currentTarget.value)}
           />
         ) : (
-          <h2 className="column-title" onDoubleClick={() => setEditingTitle(true)} title="Double-click to rename">
+          <h2
+            className="column-title"
+            onDoubleClick={() => !readOnly && setEditingTitle(true)}
+            title={readOnly ? undefined : 'Double-click to rename'}
+          >
             {column.title}
           </h2>
         )}
@@ -77,57 +82,61 @@ export function Column({ boardId, column, cards, totalCount, labels, onOpenCard 
           {cards.length !== totalCount ? `${cards.length} of ${totalCount}` : totalCount}
           {column.wipLimit > 0 && ` / ${column.wipLimit}`}
         </span>
-        <Menu
-          label={`Column actions for ${column.title}`}
-          items={[
-            { label: 'Rename', onSelect: () => setEditingTitle(true) },
-            {
-              label: column.wipLimit ? `Change WIP limit (${column.wipLimit})` : 'Set WIP limit',
-              onSelect: () => {
-                const value = window.prompt('Maximum cards in this column (0 for no limit)', String(column.wipLimit))
-                if (value !== null) {
-                  dispatch({ type: 'column/update', columnId: column.id, patch: { wipLimit: Number(value) } })
-                }
+        {!readOnly && (
+          <Menu
+            label={`Column actions for ${column.title}`}
+            items={[
+              { label: 'Rename', onSelect: () => setEditingTitle(true) },
+              {
+                label: column.wipLimit ? `Change WIP limit (${column.wipLimit})` : 'Set WIP limit',
+                onSelect: () => {
+                  const value = window.prompt('Maximum cards in this column (0 for no limit)', String(column.wipLimit))
+                  if (value !== null) {
+                    dispatch({ type: 'column/update', columnId: column.id, patch: { wipLimit: Number(value) } })
+                  }
+                },
               },
-            },
-            {
-              label: 'Clear all cards',
-              danger: true,
-              onSelect: () => {
-                if (totalCount === 0 || window.confirm(`Delete all ${totalCount} cards in "${column.title}"?`)) {
-                  dispatch({ type: 'column/clear', columnId: column.id })
-                }
+              {
+                label: 'Clear all cards',
+                danger: true,
+                onSelect: () => {
+                  if (totalCount === 0 || window.confirm(`Delete all ${totalCount} cards in "${column.title}"?`)) {
+                    dispatch({ type: 'column/clear', columnId: column.id })
+                  }
+                },
               },
-            },
-            {
-              label: 'Delete column',
-              danger: true,
-              onSelect: () => {
-                const message =
-                  totalCount > 0
-                    ? `Delete "${column.title}" and its ${totalCount} cards?`
-                    : `Delete "${column.title}"?`
-                if (window.confirm(message)) dispatch({ type: 'column/delete', boardId, columnId: column.id })
+              {
+                label: 'Delete column',
+                danger: true,
+                onSelect: () => {
+                  const message =
+                    totalCount > 0
+                      ? `Delete "${column.title}" and its ${totalCount} cards?`
+                      : `Delete "${column.title}"?`
+                  if (window.confirm(message)) dispatch({ type: 'column/delete', boardId, columnId: column.id })
+                },
               },
-            },
-          ]}
-        >
-          ⋯
-        </Menu>
+            ]}
+          >
+            ⋯
+          </Menu>
+        )}
       </header>
 
       <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
         <ul className="card-list">
           {cards.map((card) => (
-            <CardItem key={card.id} card={card} labels={labels} onOpen={onOpenCard} />
+            <CardItem key={card.id} card={card} labels={labels} onOpen={onOpenCard} readOnly={readOnly} />
           ))}
           {cards.length === 0 && (
-            <li className="column-empty">{totalCount > 0 ? 'No matching cards' : 'Drop cards here'}</li>
+            <li className="column-empty">
+              {totalCount > 0 ? 'No matching cards' : readOnly ? 'No cards' : 'Drop cards here'}
+            </li>
           )}
         </ul>
       </SortableContext>
 
-      {composing ? (
+      {readOnly ? null : composing ? (
         <div className="composer">
           <textarea
             autoFocus
