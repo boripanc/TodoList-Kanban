@@ -4,6 +4,7 @@ import type { CloudApi, CloudUser, ReceivedInvite } from './api'
 import { CloudContext, type Cloud } from './context'
 import { CloudSync } from './sync'
 import { SignInPage } from '../components/Sharing'
+import { UnreachableError } from './serverApi'
 
 const PENDING_JOIN_KEY = 'todolist-kanban/pending-join'
 
@@ -43,17 +44,23 @@ export function CloudProvider({ api, children }: { api: CloudApi | null; childre
   useEffect(() => {
     if (!api) return
     let active = true
-    const off = () => {
-      if (!active) return
-      active = false
-      console.info('Accounts are off: the app server did not answer. Boards stay on this device.')
-      setStatus('off')
-    }
-    const timer = window.setTimeout(off, 8000)
-    api.getUser().then(() => {
-      if (active) setStatus('on')
-      active = false
-    }, off)
+    let timer = 0
+    const started = Date.now()
+    const check = () =>
+      api.getUser().then(
+        () => active && setStatus('on'),
+        (error: unknown) => {
+          if (!active) return
+          // `npm run dev` starts the server alongside the app; give it time to connect to the database.
+          if (error instanceof UnreachableError && Date.now() - started < 20_000) {
+            timer = window.setTimeout(check, 1000)
+            return
+          }
+          console.info('Accounts are off: the app server did not answer. Boards stay on this device.')
+          setStatus('off')
+        },
+      )
+    void check()
     return () => {
       active = false
       window.clearTimeout(timer)
@@ -61,7 +68,12 @@ export function CloudProvider({ api, children }: { api: CloudApi | null; childre
   }, [api])
 
   if (!api || status === 'off') return <>{children}</>
-  if (status === 'checking') return null
+  if (status === 'checking')
+    return (
+      <p className="connecting muted" role="status">
+        Connecting to the server…
+      </p>
+    )
   return <CloudSession api={api}>{children}</CloudSession>
 }
 

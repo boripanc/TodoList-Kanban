@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createServerApi } from './serverApi'
+import { createServerApi, UnreachableError } from './serverApi'
 
 function answer(body: string, contentType = 'application/json', status = 200) {
   vi.stubGlobal(
@@ -26,7 +26,12 @@ describe('finding the server', () => {
     await expect(createServerApi('/api').getUser()).rejects.toThrow('not running')
     answer('Not found', 'text/plain', 404)
     await expect(createServerApi('/api').getUser()).rejects.toThrow()
+  })
+
+  it('reports a server that is still starting as unreachable', async () => {
+    answer('', 'text/plain', 500) // the dev proxy, before the server listens
+    await expect(createServerApi('/api').getUser()).rejects.toBeInstanceOf(UnreachableError)
     vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('Failed to fetch'))))
-    await expect(createServerApi('/api').getUser()).rejects.toThrow()
+    await expect(createServerApi('/api').getUser()).rejects.toBeInstanceOf(UnreachableError)
   })
 })

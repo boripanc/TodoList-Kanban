@@ -28,11 +28,20 @@ npm run dev        # http://localhost:5173
 
 Without a database the app runs on this device only. To turn on accounts and shared boards, point it at any Postgres database (version 14 or newer). The app's own small server (`server/`) sits between the browser and Postgres: a browser can't hold database credentials safely, and the server is what checks who may see or change each board.
 
-1. Copy `.env.example` to `.env.local` and set `DATABASE_URL` to your Postgres connection string.
+1. Copy `.env.example` to `.env.local` (or `.env`) and set `DATABASE_URL` to your Postgres connection string.
 2. Run `npm run dev` and open http://localhost:5173. It starts the app and its server together; on the first run the server creates its tables in a **`kanban` schema**, so it can share a database with other applications and leaves their tables alone.
 3. The app opens on a **Sign in** page; nobody can use it without an account while accounts are on. If you see the board instead, check the terminal: without `DATABASE_URL` it says accounts are off, and a database error stops the server with the reason.
 
 To run it as one thing, `npm run build` then `npm run server`: the server also serves the built app, by default on http://localhost:8787.
+
+### Deploying
+
+Accounts need the server running where you host the app; a static site host serves only the page, so the app stays on each device with no sign-in. The `Dockerfile` builds the app and runs the server, which serves both on port 8787. On Coolify:
+
+1. Set the build pack to **Dockerfile** (not Nixpacks static, and not "Is it a static site?").
+2. Set **Ports Exposes** to `8787`.
+3. Add the environment variables `DATABASE_URL` (a Postgres the Coolify server can reach) and `COOKIE_SECURE=true`.
+4. Deploy. Opening `https://your-domain/api/auth/me` should show `{"user":null}`; if it shows the app's page, the server isn't running.
 
 How it works:
 
