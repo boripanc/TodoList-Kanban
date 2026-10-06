@@ -791,6 +791,9 @@ fieldset.card-editor:disabled .card-editor-title {
 .stack .field input {
   width: 100%;
 }
+.stack .composer-actions {
+  align-items: center;
+}
 .form-error {
   color: var(--danger);
   margin: 0;

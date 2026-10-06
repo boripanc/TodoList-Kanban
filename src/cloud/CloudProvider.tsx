@@ -155,7 +155,8 @@ function CloudSession({ api, children }: { api: CloudApi; children: ReactNode })
       error,
       clearError: () => setError(null),
       reportError,
-      signIn: (email) => api.signIn(email),
+      signIn: (email, password) => api.signIn(email, password),
+      signUp: (email, password) => api.signUp(email, password),
       signOut: async () => {
         await api.signOut()
         setUser(null)

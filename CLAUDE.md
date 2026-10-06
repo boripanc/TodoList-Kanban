@@ -1,6 +1,6 @@
 # TodoList Kanban
 
-Kanban board web app for work and daily life. React 19 + TypeScript + Vite, state in `localStorage`. Optional accounts and shared boards use Supabase (`src/cloud/`, `supabase/`); without `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` the app runs on the device only.
+Kanban board web app for work and daily life. React 19 + TypeScript + Vite, state in `localStorage`. Optional accounts and shared boards run on the project's own Node server (`server/`, Hono) backed by any Postgres; without `DATABASE_URL` and `VITE_API_URL` the app runs on the device only.
 
 ## Run and check
 
@@ -16,4 +16,5 @@ Kanban board web app for work and daily life. React 19 + TypeScript + Vite, stat
 - Every new reducer action gets a test in `src/state/reducer.test.ts`; user-visible flows get a Testing Library test in `src/App.test.tsx`.
 - Keep the app usable by keyboard and on phone-width screens.
 - Cloud boards are ordinary boards with `board.cloud = { role }`. Components keep dispatching normal actions; `CloudSync` (`src/cloud/sync.ts`) diffs each cloud board against the server's last version and writes only changed rows. Server deletes happen only through explicit calls (`deleteBoard`), never because a board vanished locally. The reducer refuses edits to boards where the role is `viewer`.
-- Database changes go in a new file under `supabase/migrations/`; access rules get a test in `supabase/tests/policies.test.ts`. Keep `src/cloud/memoryApi.ts` behaving like the database rules, since the app tests use it.
+- Database changes go in a new numbered file under `server/migrations/`, never by editing an applied one; they run on server start. Every route gets a test in `server/tests/api.test.ts`, including who is refused. Keep `src/cloud/memoryApi.ts` behaving like the server, since the app tests use it.
+- The server is the only place permissions are enforced: each route checks the caller's role on that board, and request bodies go through `server/src/validate.ts` before touching the database. Treat ids in a request as the caller's claim, not a fact: the upserts refuse rows that belong to another board.

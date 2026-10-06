@@ -7,63 +7,81 @@ import { Modal } from './Modal'
 type InviteRole = Exclude<Role, 'owner'>
 
 export function SignInDialog({ cloud, reason, onClose }: { cloud: Cloud; reason?: string; onClose: () => void }) {
+  const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in')
   const [email, setEmail] = useState('')
-  const [sent, setSent] = useState(false)
+  const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const signingUp = mode === 'sign-up'
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setBusy(true)
     setError(null)
     try {
-      await cloud.signIn(email.trim())
-      setSent(true)
+      await (signingUp ? cloud.signUp : cloud.signIn)(email.trim(), password)
+      onClose()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not send the link.')
-    } finally {
+      setError(err instanceof Error ? err.message : 'Could not sign in.')
       setBusy(false)
     }
   }
 
+  const title = signingUp ? 'Create an account' : 'Sign in'
   return (
-    <Modal title="Sign in" onClose={onClose}>
-      <h2>Sign in</h2>
-      {sent ? (
-        <p>
-          We sent a sign-in link to <strong>{email.trim()}</strong>. Open it on this device to continue.
+    <Modal title={title} onClose={onClose}>
+      <h2>{title}</h2>
+      <form className="stack" onSubmit={submit}>
+        <p className="muted">
+          {reason ??
+            'Sign in to keep boards in your account, use them on any device, and share them with other people.'}{' '}
+          Boards you made without signing in stay on this device.
         </p>
-      ) : (
-        <form className="stack" onSubmit={submit}>
-          <p className="muted">
-            {reason ??
-              'Sign in to keep boards in your account, use them on any device, and share them with other people.'}{' '}
-            Boards you made without signing in stay on this device.
+        <label className="field">
+          <span>Email</span>
+          <input
+            type="email"
+            required
+            autoComplete="email"
+            data-autofocus
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+          />
+        </label>
+        <label className="field">
+          <span>Password</span>
+          <input
+            type="password"
+            required
+            minLength={signingUp ? 8 : undefined}
+            autoComplete={signingUp ? 'new-password' : 'current-password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </label>
+        {signingUp && <small className="muted">Use at least 8 characters.</small>}
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
           </p>
-          <label className="field">
-            <span>Email</span>
-            <input
-              type="email"
-              required
-              autoComplete="email"
-              data-autofocus
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-            />
-          </label>
-          {error && (
-            <p className="form-error" role="alert">
-              {error}
-            </p>
-          )}
-          <div className="composer-actions">
-            <button className="button primary" type="submit" disabled={busy}>
-              Email me a sign-in link
-            </button>
-          </div>
-        </form>
-      )}
+        )}
+        <div className="composer-actions">
+          <button className="button primary" type="submit" disabled={busy}>
+            {signingUp ? 'Create account' : 'Sign in'}
+          </button>
+          <button
+            className="link"
+            type="button"
+            onClick={() => {
+              setMode(signingUp ? 'sign-in' : 'sign-up')
+              setError(null)
+            }}
+          >
+            {signingUp ? 'I already have an account' : 'Create an account'}
+          </button>
+        </div>
+      </form>
     </Modal>
   )
 }

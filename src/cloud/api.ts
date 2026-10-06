@@ -29,12 +29,13 @@ export interface ReceivedInvite {
   invitedBy: string
 }
 
-/** Everything the app needs from the backend. Supabase in production, in memory in tests. */
+/** Everything the app needs from the backend. The app's own server in production, in memory in tests. */
 export interface CloudApi {
   getUser(): Promise<CloudUser | null>
   onAuthChange(listener: (user: CloudUser | null) => void): () => void
-  /** Send a sign-in link to this email address. */
-  signIn(email: string): Promise<void>
+  signIn(email: string, password: string): Promise<void>
+  /** Create an account and sign in to it. */
+  signUp(email: string, password: string): Promise<void>
   signOut(): Promise<void>
 
   listBoards(): Promise<BoardSummary[]>
