@@ -7,6 +7,7 @@ import { addBoardAction, createSampleState, loadState, STORAGE_KEY } from './sta
 import { CloudProvider } from './cloud/CloudProvider'
 import type { CloudApi } from './cloud/api'
 import { MemoryServer } from './cloud/memoryApi'
+import { UnreachableError } from './cloud/serverApi'
 import { extractBoardDoc } from './cloud/doc'
 import { initialState, reducer } from './state/reducer'
 
@@ -110,6 +111,17 @@ describe('accounts and sharing', () => {
     await new Promise((r) => setTimeout(r, 50))
     expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument()
     expect(screen.getByRole('main', { name: 'Board: Work' })).toBeInTheDocument()
+  })
+
+  it('waits for a server that is still starting', async () => {
+    const api = new MemoryServer().client(null)
+    const getUser = api.getUser.bind(api)
+    let calls = 0
+    api.getUser = () => (++calls === 1 ? Promise.reject(new UnreachableError('starting')) : getUser())
+    renderWithCloud(api)
+    expect(screen.getByRole('status')).toHaveTextContent('Connecting to the server')
+    expect(await screen.findByRole('main', { name: 'Sign in' }, { timeout: 3000 })).toBeInTheDocument()
+    expect(calls).toBeGreaterThan(1)
   })
 
   it('asks for sign-in before showing any board when the server answers', async () => {

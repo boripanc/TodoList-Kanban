@@ -28,7 +28,7 @@ npm run dev        # http://localhost:5173
 
 Without a database the app runs on this device only. To turn on accounts and shared boards, point it at any Postgres database (version 14 or newer). The app's own small server (`server/`) sits between the browser and Postgres: a browser can't hold database credentials safely, and the server is what checks who may see or change each board.
 
-1. Copy `.env.example` to `.env.local` and set `DATABASE_URL` to your Postgres connection string.
+1. Copy `.env.example` to `.env.local` (or `.env`) and set `DATABASE_URL` to your Postgres connection string.
 2. Run `npm run dev` and open http://localhost:5173. It starts the app and its server together; on the first run the server creates its tables in a **`kanban` schema**, so it can share a database with other applications and leaves their tables alone.
 3. The app opens on a **Sign in** page; nobody can use it without an account while accounts are on. If you see the board instead, check the terminal: without `DATABASE_URL` it says accounts are off, and a database error stops the server with the reason.
 

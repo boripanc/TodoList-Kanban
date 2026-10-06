@@ -893,3 +893,7 @@ fieldset.card-editor:disabled .card-editor-title {
   font-weight: 600;
   color: var(--accent);
 }
+.connecting {
+  padding: 48px 16px;
+  text-align: center;
+}

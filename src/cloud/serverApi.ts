@@ -1,6 +1,9 @@
 import type { CloudApi, CloudUser, Member, ReceivedInvite, SentInvite } from './api'
 import { boardRow, cardRows, columnRows, docFromRows, type BoardRow, type CardRow, type ColumnRow } from './doc'
 
+/** No answer from the server yet: it may still be starting. */
+export class UnreachableError extends Error {}
+
 class HttpError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -30,9 +33,11 @@ export function createServerApi(base: string): CloudApi {
         body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
       })
     } catch {
-      throw new Error('Could not reach the server. Check your connection.')
+      throw new UnreachableError('Could not reach the server. Check your connection.')
     }
     const data = (await res.json().catch(() => ({}))) as T & { error?: string }
+    // The dev proxy answers 5xx while the server is still starting.
+    if (res.status >= 500 && res.status <= 504 && !data.error) throw new UnreachableError(`The server answered ${res.status}.`)
     if (!res.ok) {
       // The session ended (expired, or signed out elsewhere).
       if (res.status === 401 && !path.startsWith('/auth/')) setUser(null)

@@ -24,7 +24,9 @@ const run = (command, args) => {
 if (process.env.DATABASE_URL) {
   run(bin('tsx'), ['watch', 'server/src/index.ts'])
 } else {
-  console.log('\nAccounts and sharing are off: set DATABASE_URL in .env.local to turn them on (see README).\n')
+  // Nothing to look for, so the app opens straight away on this device.
+  process.env.VITE_API_URL ??= 'off'
+  console.log('\nAccounts and sharing are off: set DATABASE_URL in .env or .env.local to turn them on (see README).\n')
 }
 run(bin('vite'), process.argv.slice(2))
 
