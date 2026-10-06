@@ -34,6 +34,15 @@ Without a database the app runs on this device only. To turn on accounts and sha
 
 To run it as one thing, `npm run build` then `npm run server`: the server also serves the built app, by default on http://localhost:8787.
 
+### Deploying
+
+Accounts need the server running where you host the app; a static site host serves only the page, so the app stays on each device with no sign-in. The `Dockerfile` builds the app and runs the server, which serves both on port 8787. On Coolify:
+
+1. Set the build pack to **Dockerfile** (not Nixpacks static, and not "Is it a static site?").
+2. Set **Ports Exposes** to `8787`.
+3. Add the environment variables `DATABASE_URL` (a Postgres the Coolify server can reach) and `COOKIE_SECURE=true`.
+4. Deploy. Opening `https://your-domain/api/auth/me` should show `{"user":null}`; if it shows the app's page, the server isn't running.
+
 How it works:
 
 - **Accounts**: people sign up with an email and a password (at least 8 characters). Passwords are stored as scrypt hashes, and sessions as hashes of a random token in an `HttpOnly` cookie. To reset a forgotten password, run `npm run server:set-password -- someone@example.com 'their new password'`; that also signs them out everywhere.
