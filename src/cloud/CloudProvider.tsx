@@ -3,6 +3,7 @@ import { useStore } from '../state/context'
 import type { CloudApi, CloudUser, ReceivedInvite } from './api'
 import { CloudContext, type Cloud } from './context'
 import { CloudSync } from './sync'
+import { SignInPage } from '../components/Sharing'
 
 const PENDING_JOIN_KEY = 'todolist-kanban/pending-join'
 
@@ -32,28 +33,35 @@ function clearPendingJoin() {
 const message = (error: unknown) => (error instanceof Error ? error.message : 'Something went wrong.')
 
 /**
- * Turns on accounts and sharing when the server answers. If it doesn't (no
- * server running, or the app is hosted without one), the app stays on this
- * device only, with no sign-in.
+ * Turns on accounts when the server answers; then nobody uses the app without
+ * signing in. If it doesn't answer (no server running, or the app is hosted
+ * without one), the app stays on this device only, with no sign-in.
  */
 export function CloudProvider({ api, children }: { api: CloudApi | null; children: ReactNode }) {
-  const [available, setAvailable] = useState(false)
+  const [status, setStatus] = useState<'checking' | 'on' | 'off'>(api ? 'checking' : 'off')
 
   useEffect(() => {
     if (!api) return
     let active = true
-    api.getUser().then(
-      () => active && setAvailable(true),
-      () => {
-        if (active) console.info('Accounts are off: the app server did not answer. Boards stay on this device.')
-      },
-    )
+    const off = () => {
+      if (!active) return
+      active = false
+      console.info('Accounts are off: the app server did not answer. Boards stay on this device.')
+      setStatus('off')
+    }
+    const timer = window.setTimeout(off, 8000)
+    api.getUser().then(() => {
+      if (active) setStatus('on')
+      active = false
+    }, off)
     return () => {
       active = false
+      window.clearTimeout(timer)
     }
   }, [api])
 
-  if (!api || !available) return <>{children}</>
+  if (!api || status === 'off') return <>{children}</>
+  if (status === 'checking') return null
   return <CloudSession api={api}>{children}</CloudSession>
 }
 
@@ -214,5 +222,9 @@ function CloudSession({ api, children }: { api: CloudApi; children: ReactNode })
     [api, user, invites, joinToken, error, reportError, saved, dispatch, refresh, refreshInvites],
   )
 
-  return <CloudContext.Provider value={value}>{children}</CloudContext.Provider>
+  return (
+    <CloudContext.Provider value={value}>
+      {user ? children : user === null ? <SignInPage cloud={value} /> : null}
+    </CloudContext.Provider>
+  )
 }

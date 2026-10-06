@@ -865,3 +865,31 @@ fieldset.card-editor:disabled .card-editor-title {
     padding: 16px;
   }
 }
+
+/* Sign-in page, shown before the app when accounts are on */
+.sign-in-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: var(--bg);
+}
+.sign-in-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--surface);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 24px;
+}
+.sign-in-card h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+.sign-in-brand {
+  margin: 0;
+  font-weight: 600;
+  color: var(--accent);
+}

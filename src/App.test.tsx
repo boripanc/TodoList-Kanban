@@ -112,30 +112,33 @@ describe('accounts and sharing', () => {
     expect(screen.getByRole('main', { name: 'Board: Work' })).toBeInTheDocument()
   })
 
-  it('shows sign-in as soon as the server answers', async () => {
+  it('asks for sign-in before showing any board when the server answers', async () => {
     renderWithCloud(new MemoryServer().client(null))
-    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeInTheDocument()
+    expect(await screen.findByRole('main', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.queryByRole('main', { name: 'Board: Work' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '+ New board' })).not.toBeInTheDocument()
   })
 
   it('creates an account, signs out and signs back in', async () => {
     const user = userEvent.setup()
     renderWithCloud(new MemoryServer().client(null))
-    await user.click(await screen.findByRole('button', { name: 'Sign in' }))
-    await user.click(screen.getByRole('button', { name: 'Create an account' }))
+    await user.click(await screen.findByRole('button', { name: 'Create an account' }))
     await user.type(screen.getByLabelText('Email'), 'ana@example.com')
     await user.type(screen.getByLabelText('Password'), 'correct horse')
     await user.click(screen.getByRole('button', { name: 'Create account' }))
-    await user.click(await screen.findByRole('button', { name: 'Account: ana@example.com' }))
+    expect(await screen.findByRole('main', { name: 'Board: Work' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Account: ana@example.com' }))
     await user.click(screen.getByRole('menuitem', { name: 'Sign out ana@example.com' }))
 
-    await user.click(await screen.findByRole('button', { name: 'Sign in' }))
+    expect(await screen.findByRole('main', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.queryByRole('main', { name: 'Board: Work' })).not.toBeInTheDocument()
     await user.type(screen.getByLabelText('Email'), 'ana@example.com')
     await user.type(screen.getByLabelText('Password'), 'wrong password')
-    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Sign in' }))
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Wrong email or password')
     await user.clear(screen.getByLabelText('Password'))
     await user.type(screen.getByLabelText('Password'), 'correct horse')
-    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Sign in' }))
+    await user.click(screen.getByRole('button', { name: 'Sign in' }))
     expect(await screen.findByRole('button', { name: 'Account: ana@example.com' })).toBeInTheDocument()
   })
 

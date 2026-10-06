@@ -1,6 +1,6 @@
 # TodoList Kanban
 
-Kanban board web app for work and daily life. React 19 + TypeScript + Vite, state in `localStorage`. Optional accounts and shared boards run on the project's own Node server (`server/`, Hono) backed by any Postgres; without `DATABASE_URL` (or when the server does not answer) the app runs on the device only, and `npm run dev` starts the server alongside Vite when `DATABASE_URL` is set.
+Kanban board web app for work and daily life. React 19 + TypeScript + Vite, state in `localStorage`. Optional accounts and shared boards run on the project's own Node server (`server/`, Hono) backed by any Postgres; without `DATABASE_URL` (or when the server does not answer) the app runs on the device only, and `npm run dev` starts the server alongside Vite when `DATABASE_URL` is set. When the server answers, the app shows only a sign-in page until someone signs in.
 
 ## Run and check
 
