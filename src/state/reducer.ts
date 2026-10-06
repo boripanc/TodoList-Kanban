@@ -1,0 +1,307 @@
+import type { AppState, Board, Card, Column, Label } from '../types'
+import { templateColumns, templateLabels, type BoardTemplate } from './templates'
+
+export type Action =
+  | { type: 'board/add'; id: string; title: string; template: BoardTemplate; ids: string[]; now: number }
+  | { type: 'board/rename'; boardId: string; title: string }
+  | { type: 'board/delete'; boardId: string }
+  | { type: 'board/select'; boardId: string }
+  | { type: 'label/add'; boardId: string; label: Label }
+  | { type: 'label/update'; boardId: string; labelId: string; patch: Partial<Omit<Label, 'id'>> }
+  | { type: 'label/delete'; boardId: string; labelId: string }
+  | { type: 'column/add'; boardId: string; id: string; title: string }
+  | { type: 'column/update'; columnId: string; patch: Partial<Pick<Column, 'title' | 'wipLimit'>> }
+  | { type: 'column/delete'; boardId: string; columnId: string }
+  | { type: 'column/move'; boardId: string; columnId: string; toIndex: number }
+  | { type: 'column/clear'; columnId: string }
+  | { type: 'card/add'; columnId: string; id: string; title: string; now: number }
+  | { type: 'card/update'; cardId: string; patch: Partial<Omit<Card, 'id' | 'createdAt'>>; now: number }
+  | { type: 'card/delete'; cardId: string }
+  | { type: 'card/duplicate'; cardId: string; newId: string; now: number }
+  | { type: 'card/move'; cardId: string; toColumnId: string; toIndex: number }
+  | { type: 'state/replace'; state: AppState }
+
+export const initialState: AppState = {
+  version: 1,
+  boardOrder: [],
+  activeBoardId: null,
+  boards: {},
+  columns: {},
+  cards: {},
+}
+
+function omit<T>(record: Record<string, T>, keys: string[]): Record<string, T> {
+  const next = { ...record }
+  for (const key of keys) delete next[key]
+  return next
+}
+
+function insertAt<T>(list: T[], index: number, item: T): T[] {
+  const clamped = Math.max(0, Math.min(index, list.length))
+  return [...list.slice(0, clamped), item, ...list.slice(clamped)]
+}
+
+export function findColumnOfCard(state: AppState, cardId: string): Column | undefined {
+  return Object.values(state.columns).find((column) => column.cardIds.includes(cardId))
+}
+
+export function reducer(state: AppState, action: Action): AppState {
+  switch (action.type) {
+    case 'board/add': {
+      // `ids` supplies pre-generated ids: first for columns, then for labels.
+      const columnTitles = templateColumns[action.template]
+      const labelSeeds = templateLabels[action.template]
+      const columnIds = action.ids.slice(0, columnTitles.length)
+      const labelIds = action.ids.slice(columnTitles.length, columnTitles.length + labelSeeds.length)
+      const columns: Record<string, Column> = { ...state.columns }
+      columnTitles.forEach((title, i) => {
+        columns[columnIds[i]] = { id: columnIds[i], title, cardIds: [], wipLimit: 0 }
+      })
+      const board: Board = {
+        id: action.id,
+        title: action.title.trim() || 'Untitled board',
+        columnIds,
+        labels: labelSeeds.map((seed, i) => ({ ...seed, id: labelIds[i] })),
+        createdAt: action.now,
+      }
+      return {
+        ...state,
+        boards: { ...state.boards, [board.id]: board },
+        boardOrder: [...state.boardOrder, board.id],
+        columns,
+        activeBoardId: board.id,
+      }
+    }
+
+    case 'board/rename': {
+      const board = state.boards[action.boardId]
+      const title = action.title.trim()
+      if (!board || !title) return state
+      return { ...state, boards: { ...state.boards, [board.id]: { ...board, title } } }
+    }
+
+    case 'board/delete': {
+      const board = state.boards[action.boardId]
+      if (!board) return state
+      const cardIds = board.columnIds.flatMap((id) => state.columns[id]?.cardIds ?? [])
+      const boardOrder = state.boardOrder.filter((id) => id !== board.id)
+      const activeBoardId =
+        state.activeBoardId === board.id ? (boardOrder[0] ?? null) : state.activeBoardId
+      return {
+        ...state,
+        boardOrder,
+        activeBoardId,
+        boards: omit(state.boards, [board.id]),
+        columns: omit(state.columns, board.columnIds),
+        cards: omit(state.cards, cardIds),
+      }
+    }
+
+    case 'board/select':
+      if (!state.boards[action.boardId]) return state
+      return { ...state, activeBoardId: action.boardId }
+
+    case 'label/add': {
+      const board = state.boards[action.boardId]
+      if (!board) return state
+      return {
+        ...state,
+        boards: { ...state.boards, [board.id]: { ...board, labels: [...board.labels, action.label] } },
+      }
+    }
+
+    case 'label/update': {
+      const board = state.boards[action.boardId]
+      if (!board) return state
+      const labels = board.labels.map((label) =>
+        label.id === action.labelId ? { ...label, ...action.patch } : label,
+      )
+      return { ...state, boards: { ...state.boards, [board.id]: { ...board, labels } } }
+    }
+
+    case 'label/delete': {
+      const board = state.boards[action.boardId]
+      if (!board) return state
+      const cards = { ...state.cards }
+      for (const columnId of board.columnIds) {
+        for (const cardId of state.columns[columnId]?.cardIds ?? []) {
+          const card = cards[cardId]
+          if (card?.labelIds.includes(action.labelId)) {
+            cards[cardId] = { ...card, labelIds: card.labelIds.filter((id) => id !== action.labelId) }
+          }
+        }
+      }
+      const labels = board.labels.filter((label) => label.id !== action.labelId)
+      return { ...state, cards, boards: { ...state.boards, [board.id]: { ...board, labels } } }
+    }
+
+    case 'column/add': {
+      const board = state.boards[action.boardId]
+      if (!board) return state
+      const column: Column = {
+        id: action.id,
+        title: action.title.trim() || 'Untitled',
+        cardIds: [],
+        wipLimit: 0,
+      }
+      return {
+        ...state,
+        columns: { ...state.columns, [column.id]: column },
+        boards: {
+          ...state.boards,
+          [board.id]: { ...board, columnIds: [...board.columnIds, column.id] },
+        },
+      }
+    }
+
+    case 'column/update': {
+      const column = state.columns[action.columnId]
+      if (!column) return state
+      const patch = { ...action.patch }
+      if (patch.title !== undefined) {
+        patch.title = patch.title.trim()
+        if (!patch.title) delete patch.title
+      }
+      if (patch.wipLimit !== undefined) {
+        patch.wipLimit = Math.max(0, Math.floor(patch.wipLimit) || 0)
+      }
+      return { ...state, columns: { ...state.columns, [column.id]: { ...column, ...patch } } }
+    }
+
+    case 'column/delete': {
+      const board = state.boards[action.boardId]
+      const column = state.columns[action.columnId]
+      if (!board || !column) return state
+      return {
+        ...state,
+        boards: {
+          ...state.boards,
+          [board.id]: { ...board, columnIds: board.columnIds.filter((id) => id !== column.id) },
+        },
+        columns: omit(state.columns, [column.id]),
+        cards: omit(state.cards, column.cardIds),
+      }
+    }
+
+    case 'column/move': {
+      const board = state.boards[action.boardId]
+      if (!board || !board.columnIds.includes(action.columnId)) return state
+      const rest = board.columnIds.filter((id) => id !== action.columnId)
+      const columnIds = insertAt(rest, action.toIndex, action.columnId)
+      return { ...state, boards: { ...state.boards, [board.id]: { ...board, columnIds } } }
+    }
+
+    case 'column/clear': {
+      const column = state.columns[action.columnId]
+      if (!column) return state
+      return {
+        ...state,
+        columns: { ...state.columns, [column.id]: { ...column, cardIds: [] } },
+        cards: omit(state.cards, column.cardIds),
+      }
+    }
+
+    case 'card/add': {
+      const column = state.columns[action.columnId]
+      const title = action.title.trim()
+      if (!column || !title) return state
+      const card: Card = {
+        id: action.id,
+        title,
+        description: '',
+        labelIds: [],
+        priority: 'none',
+        dueDate: null,
+        checklist: [],
+        createdAt: action.now,
+        updatedAt: action.now,
+      }
+      return {
+        ...state,
+        cards: { ...state.cards, [card.id]: card },
+        columns: {
+          ...state.columns,
+          [column.id]: { ...column, cardIds: [...column.cardIds, card.id] },
+        },
+      }
+    }
+
+    case 'card/update': {
+      const card = state.cards[action.cardId]
+      if (!card) return state
+      const patch = { ...action.patch }
+      if (patch.title !== undefined) {
+        patch.title = patch.title.trim()
+        if (!patch.title) delete patch.title
+      }
+      return {
+        ...state,
+        cards: { ...state.cards, [card.id]: { ...card, ...patch, updatedAt: action.now } },
+      }
+    }
+
+    case 'card/delete': {
+      const column = findColumnOfCard(state, action.cardId)
+      const columns = column
+        ? {
+            ...state.columns,
+            [column.id]: { ...column, cardIds: column.cardIds.filter((id) => id !== action.cardId) },
+          }
+        : state.columns
+      return { ...state, columns, cards: omit(state.cards, [action.cardId]) }
+    }
+
+    case 'card/duplicate': {
+      const card = state.cards[action.cardId]
+      const column = findColumnOfCard(state, action.cardId)
+      if (!card || !column) return state
+      const copy: Card = {
+        ...card,
+        id: action.newId,
+        title: `${card.title} (copy)`,
+        labelIds: [...card.labelIds],
+        checklist: card.checklist.map((item, i) => ({ ...item, id: `${action.newId}-${i}` })),
+        createdAt: action.now,
+        updatedAt: action.now,
+      }
+      const index = column.cardIds.indexOf(card.id) + 1
+      return {
+        ...state,
+        cards: { ...state.cards, [copy.id]: copy },
+        columns: {
+          ...state.columns,
+          [column.id]: { ...column, cardIds: insertAt(column.cardIds, index, copy.id) },
+        },
+      }
+    }
+
+    case 'card/move': {
+      const from = findColumnOfCard(state, action.cardId)
+      const to = state.columns[action.toColumnId]
+      if (!from || !to) return state
+      if (from.id === to.id) {
+        const current = from.cardIds.indexOf(action.cardId)
+        if (current === action.toIndex) return state
+        const rest = from.cardIds.filter((id) => id !== action.cardId)
+        return {
+          ...state,
+          columns: {
+            ...state.columns,
+            [from.id]: { ...from, cardIds: insertAt(rest, action.toIndex, action.cardId) },
+          },
+        }
+      }
+      return {
+        ...state,
+        columns: {
+          ...state.columns,
+          [from.id]: { ...from, cardIds: from.cardIds.filter((id) => id !== action.cardId) },
+          [to.id]: { ...to, cardIds: insertAt(to.cardIds, action.toIndex, action.cardId) },
+        },
+      }
+    }
+
+    case 'state/replace':
+      return action.state
+  }
+}
