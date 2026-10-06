@@ -29,8 +29,8 @@ npm run dev        # http://localhost:5173
 Without a database the app runs on this device only. To turn on accounts and shared boards, point it at any Postgres database (version 14 or newer). The app's own small server (`server/`) sits between the browser and Postgres: a browser can't hold database credentials safely, and the server is what checks who may see or change each board.
 
 1. Copy `.env.example` to `.env.local` and set `DATABASE_URL` to your Postgres connection string.
-2. Start the server with `npm run server`. On its first run it creates its tables in a **`kanban` schema**, so it can share a database with other applications and leaves their tables alone.
-3. In another terminal, run `npm run dev` and open http://localhost:5173. Vite passes `/api` through to the server. A **Sign in** button appears in the top bar.
+2. Run `npm run dev` and open http://localhost:5173. It starts the app and its server together; on the first run the server creates its tables in a **`kanban` schema**, so it can share a database with other applications and leaves their tables alone.
+3. A **Sign in** button appears in the top bar. If it doesn't, check the terminal: without `DATABASE_URL` it says accounts are off, and a database error stops the server with the reason.
 
 To run it as one thing, `npm run build` then `npm run server`: the server also serves the built app, by default on http://localhost:8787.
 
@@ -50,7 +50,7 @@ How it works:
 | `DATABASE_URL` | Postgres connection string. Required by the server. |
 | `PORT` | Port for the server (default 8787). |
 | `COOKIE_SECURE` | Set to `true` when serving over https, so the session cookie is https-only. |
-| `VITE_API_URL` | Where the app looks for the API. `/api` unless the server runs on another address. Empty turns accounts off. |
+| `VITE_API_URL` | Where the app looks for the API (default `/api`). Set it only when the server runs on another address; `off` turns accounts off. |
 
 Behind a reverse proxy, forward `/api` to the server and keep the app on the same origin, so the session cookie is sent.
 
@@ -58,7 +58,8 @@ Behind a reverse proxy, forward `/api` to the server and keep the app on the sam
 
 | Command | What it does |
 | --- | --- |
-| `npm run dev` | Start the Vite dev server |
+| `npm run dev` | Start the app on port 5173, plus the API server when `DATABASE_URL` is set |
+| `npm run dev:app` | Start only the Vite dev server |
 | `npm run build` | Typecheck and build to `dist/` |
 | `npm run preview` | Serve the production build |
 | `npm test` | Run the app, server and database tests once (Vitest, Testing Library, PGlite) |

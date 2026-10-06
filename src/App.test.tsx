@@ -103,6 +103,20 @@ async function serverWithTrip() {
 describe('accounts and sharing', () => {
   afterEach(() => window.history.replaceState(null, '', '/'))
 
+  it('stays on this device, with no sign-in, when the server does not answer', async () => {
+    const api = new MemoryServer().client(null)
+    api.getUser = () => Promise.reject(new Error('The app server is not running.'))
+    renderWithCloud(api)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument()
+    expect(screen.getByRole('main', { name: 'Board: Work' })).toBeInTheDocument()
+  })
+
+  it('shows sign-in as soon as the server answers', async () => {
+    renderWithCloud(new MemoryServer().client(null))
+    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeInTheDocument()
+  })
+
   it('creates an account, signs out and signs back in', async () => {
     const user = userEvent.setup()
     renderWithCloud(new MemoryServer().client(null))

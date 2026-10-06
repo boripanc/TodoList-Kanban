@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev.mjs",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
@@ -14,7 +14,8 @@
     "server": "tsx server/src/index.ts",
     "dev:server": "tsx watch server/src/index.ts",
     "start": "tsx server/src/index.ts",
-    "server:set-password": "tsx server/src/cli.ts set-password"
+    "server:set-password": "tsx server/src/cli.ts set-password",
+    "dev:app": "vite"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
