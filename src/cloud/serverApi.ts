@@ -45,7 +45,10 @@ export function createServerApi(base: string): CloudApi {
 
   return {
     async getUser() {
-      const { user: me } = await call<{ user: CloudUser | null }>('GET', '/auth/me')
+      const data = await call<{ user?: CloudUser | null }>('GET', '/auth/me')
+      // A static host answers /api with the app's own page or {}; only the real server says who is signed in.
+      if (!data || typeof data !== 'object' || !('user' in data)) throw new Error('The app server is not running.')
+      const me = data.user ?? null
       setUser(me)
       return me
     },

@@ -31,8 +31,29 @@ function clearPendingJoin() {
 
 const message = (error: unknown) => (error instanceof Error ? error.message : 'Something went wrong.')
 
+/**
+ * Turns on accounts and sharing when the server answers. If it doesn't (no
+ * server running, or the app is hosted without one), the app stays on this
+ * device only, with no sign-in.
+ */
 export function CloudProvider({ api, children }: { api: CloudApi | null; children: ReactNode }) {
-  if (!api) return <>{children}</>
+  const [available, setAvailable] = useState(false)
+
+  useEffect(() => {
+    if (!api) return
+    let active = true
+    api.getUser().then(
+      () => active && setAvailable(true),
+      () => {
+        if (active) console.info('Accounts are off: the app server did not answer. Boards stay on this device.')
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [api])
+
+  if (!api || !available) return <>{children}</>
   return <CloudSession api={api}>{children}</CloudSession>
 }
 
