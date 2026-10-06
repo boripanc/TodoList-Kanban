@@ -1,11 +1,20 @@
-import { useEffect, useReducer, type ReactNode } from 'react'
+import { useCallback, useEffect, useReducer, useRef, type ReactNode } from 'react'
 import type { AppState } from '../types'
-import { reducer } from './reducer'
+import { reducer, type Action } from './reducer'
 import { loadState, saveState } from './storage'
 import { StoreContext } from './context'
 
 export function StoreProvider({ children, initial }: { children: ReactNode; initial?: AppState }) {
-  const [state, dispatch] = useReducer(reducer, initial, (seed) => seed ?? loadState())
+  const [state, rawDispatch] = useReducer(reducer, initial, (seed) => seed ?? loadState())
+  // The latest state, updated as soon as an action is dispatched, for code that
+  // runs right after a dispatch (cloud sync) and can't wait for a render.
+  const latest = useRef(state)
+
+  const dispatch = useCallback((action: Action) => {
+    latest.current = reducer(latest.current, action)
+    rawDispatch(action)
+  }, [])
+  const getState = useCallback(() => latest.current, [])
 
   useEffect(() => {
     // Drags dispatch many moves in a row; write once things settle.
@@ -13,5 +22,5 @@ export function StoreProvider({ children, initial }: { children: ReactNode; init
     return () => window.clearTimeout(timer)
   }, [state])
 
-  return <StoreContext.Provider value={{ state, dispatch }}>{children}</StoreContext.Provider>
+  return <StoreContext.Provider value={{ state, dispatch, getState }}>{children}</StoreContext.Provider>
 }

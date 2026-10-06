@@ -723,6 +723,121 @@ small.due-hint {
   padding: 32px 16px;
 }
 
+/* Accounts and sharing */
+fieldset.card-editor {
+  border: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+fieldset.card-editor:disabled .card-editor-title {
+  cursor: default;
+}
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  font-size: 0.85rem;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+  padding: 8px 8px 8px 14px;
+  background: var(--text);
+  color: var(--bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+}
+.toast .icon-button {
+  color: inherit;
+}
+.account-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+  cursor: pointer;
+  position: relative;
+}
+.badge-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--danger);
+  border: 2px solid var(--surface);
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.stack .field input {
+  width: 100%;
+}
+.form-error {
+  color: var(--danger);
+  margin: 0;
+}
+.share-section {
+  margin-top: 16px;
+}
+.share-section h3 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 0 0 8px;
+}
+.share-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.share-list li,
+.share-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.share-row input[type='email'] {
+  flex: 1 1 200px;
+}
+.share-who {
+  flex: 1 1 180px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.share-link {
+  flex: 1 1 220px;
+  min-width: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}
+
 @media (max-width: 640px) {
   .topbar {
     padding: 8px 12px;

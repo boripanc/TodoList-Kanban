@@ -27,11 +27,13 @@ interface BoardProps {
   board: BoardType
   filter: CardFilter
   onOpenCard: (cardId: string) => void
+  /** Viewers of a shared board can open cards but not change anything. */
+  readOnly?: boolean
 }
 
 type ActiveDrag = { type: 'card' | 'column'; id: string } | null
 
-export function Board({ board, filter, onOpenCard }: BoardProps) {
+export function Board({ board, filter, onOpenCard, readOnly = false }: BoardProps) {
   const { state, dispatch } = useStore()
   const [active, setActive] = useState<ActiveDrag>(null)
   const [addingColumn, setAddingColumn] = useState(false)
@@ -46,6 +48,8 @@ export function Board({ board, filter, onOpenCard }: BoardProps) {
       keyboardCodes: { start: ['Space'], cancel: ['Escape'], end: ['Space', 'Enter'] },
     }),
   )
+
+  const noSensors = useSensors()
 
   const visibleCards = useMemo(() => {
     const now = new Date()
@@ -137,7 +141,7 @@ export function Board({ board, filter, onOpenCard }: BoardProps) {
 
   return (
     <DndContext
-      sensors={sensors}
+      sensors={readOnly ? noSensors : sensors}
       collisionDetection={collisionDetection}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
@@ -158,45 +162,48 @@ export function Board({ board, filter, onOpenCard }: BoardProps) {
                 totalCount={column.cardIds.length}
                 labels={board.labels}
                 onOpenCard={openCard}
+                readOnly={readOnly}
               />
             )
           })}
         </SortableContext>
 
-        <div className="add-column">
-          {addingColumn ? (
-            <form
-              className="composer"
-              onSubmit={(e) => {
-                e.preventDefault()
-                const input = e.currentTarget.elements.namedItem('title') as HTMLInputElement
-                if (!input.value.trim()) return
-                dispatch({ type: 'column/add', boardId: board.id, id: createId(), title: input.value })
-                input.value = ''
-              }}
-            >
-              <input
-                name="title"
-                autoFocus
-                placeholder="Column title"
-                aria-label="New column title"
-                onKeyDown={(e) => e.key === 'Escape' && setAddingColumn(false)}
-              />
-              <div className="composer-actions">
-                <button className="button primary" type="submit">
-                  Add column
-                </button>
-                <button className="button ghost" type="button" onClick={() => setAddingColumn(false)}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          ) : (
-            <button className="add-column-button" onClick={() => setAddingColumn(true)}>
-              + Add column
-            </button>
-          )}
-        </div>
+        {!readOnly && (
+          <div className="add-column">
+            {addingColumn ? (
+              <form
+                className="composer"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  const input = e.currentTarget.elements.namedItem('title') as HTMLInputElement
+                  if (!input.value.trim()) return
+                  dispatch({ type: 'column/add', boardId: board.id, id: createId(), title: input.value })
+                  input.value = ''
+                }}
+              >
+                <input
+                  name="title"
+                  autoFocus
+                  placeholder="Column title"
+                  aria-label="New column title"
+                  onKeyDown={(e) => e.key === 'Escape' && setAddingColumn(false)}
+                />
+                <div className="composer-actions">
+                  <button className="button primary" type="submit">
+                    Add column
+                  </button>
+                  <button className="button ghost" type="button" onClick={() => setAddingColumn(false)}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <button className="add-column-button" onClick={() => setAddingColumn(true)}>
+                + Add column
+              </button>
+            )}
+          </div>
+        )}
       </main>
 
       <DragOverlay>

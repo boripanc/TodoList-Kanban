@@ -6,7 +6,17 @@ export interface MenuItem {
   danger?: boolean
 }
 
-export function Menu({ label, items, children }: { label: string; items: MenuItem[]; children: ReactNode }) {
+export function Menu({
+  label,
+  items,
+  children,
+  triggerClassName = 'icon-button',
+}: {
+  label: string
+  items: MenuItem[]
+  children: ReactNode
+  triggerClassName?: string
+}) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
 
@@ -27,7 +37,7 @@ export function Menu({ label, items, children }: { label: string; items: MenuIte
   return (
     <div className="menu" ref={rootRef}>
       <button
-        className="icon-button"
+        className={triggerClassName}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}

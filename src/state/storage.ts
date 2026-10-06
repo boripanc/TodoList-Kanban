@@ -43,7 +43,11 @@ export function saveState(state: AppState, storage: Storage | undefined = global
 }
 
 /** Build the add-board action, generating ids for the template's columns and labels. */
-export function addBoardAction(title: string, template: BoardTemplate, now = Date.now()): Action {
+export function addBoardAction(
+  title: string,
+  template: BoardTemplate,
+  now = Date.now(),
+): Extract<Action, { type: 'board/add' }> {
   const count = templateColumns[template].length + templateLabels[template].length
   return {
     type: 'board/add',
