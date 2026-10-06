@@ -8,7 +8,7 @@ interface Invite extends SentInvite {
 }
 
 /**
- * An in-memory stand-in for the Supabase backend, with the same access rules.
+ * An in-memory stand-in for the server (server/), with the same access rules.
  * Several users can share one server, which is how the tests exercise sharing.
  */
 export class MemoryServer {
@@ -22,9 +22,12 @@ export class MemoryServer {
   private clock = 0
   private nextId = 1
 
-  addUser(email: string): CloudUser {
+  passwords = new Map<string, string>()
+
+  addUser(email: string, password = 'password123'): CloudUser {
     const user = { id: `user-${this.nextId++}`, email }
     this.users.set(user.id, user)
+    this.passwords.set(user.id, password)
     return user
   }
 
@@ -90,8 +93,18 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
       authListeners.add(listener)
       return () => void authListeners.delete(listener)
     },
-    async signIn(email) {
-      if (!email.includes('@')) throw new Error('Enter a valid email address')
+    async signIn(email, password) {
+      const found = [...server.users.values()].find((u) => u.email === email.trim().toLowerCase())
+      if (!found || server.passwords.get(found.id) !== password) throw new Error('Wrong email or password')
+      api.setUser(found)
+    },
+    async signUp(email, password) {
+      const normalized = email.trim().toLowerCase()
+      if ([...server.users.values()].some((u) => u.email === normalized)) {
+        throw new Error('An account with this email already exists. Sign in instead.')
+      }
+      if (password.length < 8) throw new Error('Use a password of at least 8 characters')
+      api.setUser(server.addUser(normalized, password))
     },
     async signOut() {
       api.setUser(null)

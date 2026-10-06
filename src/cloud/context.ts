@@ -12,7 +12,8 @@ export interface Cloud {
   error: string | null
   clearError: () => void
   reportError: (error: unknown) => void
-  signIn: (email: string) => Promise<void>
+  signIn: (email: string, password: string) => Promise<void>
+  signUp: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
   /** Create a board in the user's account. */
   createBoard: (action: Extract<Action, { type: 'board/add' }>) => void

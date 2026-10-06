@@ -103,13 +103,26 @@ async function serverWithTrip() {
 describe('accounts and sharing', () => {
   afterEach(() => window.history.replaceState(null, '', '/'))
 
-  it('offers sign-in and sends a sign-in link', async () => {
+  it('creates an account, signs out and signs back in', async () => {
     const user = userEvent.setup()
     renderWithCloud(new MemoryServer().client(null))
     await user.click(await screen.findByRole('button', { name: 'Sign in' }))
+    await user.click(screen.getByRole('button', { name: 'Create an account' }))
     await user.type(screen.getByLabelText('Email'), 'ana@example.com')
-    await user.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
-    expect(await screen.findByText(/We sent a sign-in link/)).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Password'), 'correct horse')
+    await user.click(screen.getByRole('button', { name: 'Create account' }))
+    await user.click(await screen.findByRole('button', { name: 'Account: ana@example.com' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Sign out ana@example.com' }))
+
+    await user.click(await screen.findByRole('button', { name: 'Sign in' }))
+    await user.type(screen.getByLabelText('Email'), 'ana@example.com')
+    await user.type(screen.getByLabelText('Password'), 'wrong password')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Sign in' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Wrong email or password')
+    await user.clear(screen.getByLabelText('Password'))
+    await user.type(screen.getByLabelText('Password'), 'correct horse')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Sign in' }))
+    expect(await screen.findByRole('button', { name: 'Account: ana@example.com' })).toBeInTheDocument()
   })
 
   it('creates a board in the account and invites someone by email and by link', async () => {
