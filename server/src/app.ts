@@ -590,8 +590,15 @@ export function createApp({ db, events, secureCookies = false, publicUrl }: AppO
   // Log MCP traffic in one line per request, so a client that sees no tools can be traced in the server logs.
   root.use(async (c, next) => {
     await next()
-    if (['/', '/api/mcp', '/api/mcp/'].includes(c.req.path) && c.req.method !== 'GET' && c.req.method !== 'HEAD') {
-      console.log(`MCP ${c.req.method} ${c.req.path} -> ${c.res.status}`)
+    const path = c.req.path
+    if (['/', '/api/mcp', '/api/mcp/'].includes(path) && c.req.method !== 'GET' && c.req.method !== 'HEAD') {
+      // Which kind of credential came along (never the credential itself), to trace connection problems.
+      const credential = (c.req.header('x-api-key') ?? c.req.header('authorization') ?? '').replace(/^Bearer\s+/i, '')
+      const kind = !credential ? 'none' : (['kbo_', 'kbn_'].find((prefix) => credential.startsWith(prefix)) ?? 'other')
+      console.log(`MCP ${c.req.method} ${path} -> ${c.res.status} (credential: ${kind})`)
+    } else if (path.startsWith('/.well-known/') || (path.startsWith('/api/oauth/') && c.req.method === 'GET')) {
+      // Discovery and the sign-in page: shows how far a connecting client got.
+      console.log(`OAuth ${c.req.method} ${path} -> ${c.res.status}`)
     }
   })
 
