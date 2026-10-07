@@ -42,6 +42,7 @@ export function publicOrigin(c: Context, publicUrl?: string): string {
 }
 
 export const protectedResourceMetadataUrl = (origin: string) => `${origin}/.well-known/oauth-protected-resource/api/mcp`
+export const rootResourceMetadataUrl = (origin: string) => `${origin}/.well-known/oauth-protected-resource`
 
 /** The user an OAuth access token belongs to, or null when it's unknown or expired. */
 export async function userForAccessToken(db: Db, token: string): Promise<User | null> {
@@ -67,18 +68,20 @@ export async function userForAccessToken(db: Db, token: string): Promise<User | 
 export function wellKnownRoutes({ publicUrl }: Pick<OAuthOptions, 'publicUrl'>) {
   const app = new Hono()
   app.use('/.well-known/*', cors())
-  const resource = (c: Context) => {
+  // The MCP server answers at /api/mcp and at the site root, so each has its own metadata.
+  const resource = (path: string) => (c: Context) => {
     const origin = publicOrigin(c, publicUrl)
     return c.json({
-      resource: `${origin}/api/mcp`,
+      resource: `${origin}${path}`,
       authorization_servers: [origin],
       scopes_supported: [SCOPE],
       bearer_methods_supported: ['header'],
       resource_name: 'TodoList Kanban',
     })
   }
-  app.get('/.well-known/oauth-protected-resource', resource)
-  app.get('/.well-known/oauth-protected-resource/api/mcp', resource)
+  app.get('/.well-known/oauth-protected-resource', resource('/'))
+  app.get('/.well-known/oauth-protected-resource/api/mcp', resource('/api/mcp'))
+  app.get('/.well-known/oauth-protected-resource/api/mcp/', resource('/api/mcp'))
   const server = (c: Context) => {
     const origin = publicOrigin(c, publicUrl)
     return c.json({

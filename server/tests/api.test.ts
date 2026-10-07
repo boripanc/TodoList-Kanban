@@ -615,6 +615,40 @@ describe('MCP endpoint', () => {
     })
     expect(res.status).toBe(401)
   })
+
+  it('answers at the site address and with a trailing slash too', async () => {
+    const n8n = await apiKeyFor(await ownerWithBoard())
+    const headers = { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'kanban.example.com' }
+    const list = (path: string, auth: Record<string, string> = { authorization: `Bearer ${n8n.key}` }) =>
+      app.request(path, {
+        method: 'POST',
+        headers: { ...headers, ...auth, 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+      })
+    for (const path of ['/', '/api/mcp/']) {
+      const res = await list(path)
+      expect(res.status).toBe(200)
+      expect((await res.json()).result.tools.length).toBeGreaterThan(0)
+    }
+
+    const unauthorized = await list('/', {})
+    expect(unauthorized.status).toBe(401)
+    expect(unauthorized.headers.get('www-authenticate')).toBe(
+      'Bearer resource_metadata="https://kanban.example.com/.well-known/oauth-protected-resource"',
+    )
+    const revoked = await list('/', { authorization: 'Bearer kbo_nope' })
+    expect(revoked.headers.get('www-authenticate')).toContain('error="invalid_token"')
+    const resource = await (await app.request('/.well-known/oauth-protected-resource', { headers })).json()
+    expect(resource.resource).toBe('https://kanban.example.com/')
+    const slashed = await (await app.request('/.well-known/oauth-protected-resource/api/mcp/', { headers })).json()
+    expect(slashed.resource).toBe('https://kanban.example.com/api/mcp')
+
+    const stream = await app.request('/', { headers: { accept: 'text/event-stream' } })
+    expect(stream.status).toBe(405)
+    expect((await app.request('/', { method: 'DELETE' })).status).toBe(405)
+    expect((await app.request('/api/mcp/', { headers: { 'x-api-key': n8n.key } })).status).toBe(405)
+    expect((await app.request('/', { headers: { accept: 'text/html' } })).status).not.toBe(405)
+  })
 })
 
 describe('OAuth for MCP clients', () => {
