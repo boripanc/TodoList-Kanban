@@ -37,6 +37,14 @@ export interface ApiKey {
   lastUsedAt: string | null
 }
 
+/** An app, such as Claude, that the user allowed to use their boards by signing in (OAuth). */
+export interface ConnectedApp {
+  id: string
+  name: string
+  connectedAt: string
+  lastUsedAt: string | null
+}
+
 /** Everything the app needs from the backend. The app's own server in production, in memory in tests. */
 export interface CloudApi {
   getUser(): Promise<CloudUser | null>
@@ -75,6 +83,9 @@ export interface CloudApi {
   /** Returns the new key's details and the secret key, which can't be read again later. */
   createApiKey(name: string): Promise<ApiKey & { key: string }>
   revokeApiKey(keyId: string): Promise<void>
+  listConnectedApps(): Promise<ConnectedApp[]>
+  /** Its access stops right away. */
+  disconnectApp(appId: string): Promise<void>
 
   /**
    * Listen for changes made elsewhere: `onBoard` when a board's content changes,

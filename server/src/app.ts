@@ -9,6 +9,7 @@ import { API_KEY_PREFIX, hashPassword, hashToken, MIN_PASSWORD_LENGTH, newToken,
 import type { Db, Queryable } from './db.ts'
 import type { EventHub } from './events.ts'
 import { handleMcp } from './mcp.ts'
+import * as oauth from './oauth.ts'
 import { openApiSpec } from './openapi.ts'
 import { restApi } from './rest.ts'
 import * as v from './validate.ts'
@@ -23,6 +24,8 @@ export interface AppOptions {
   events: EventHub
   /** Mark the session cookie Secure (set when serving over https). */
   secureCookies?: boolean
+  /** The site's public address, e.g. https://workstream.example.com, for OAuth. Defaults to the request's. */
+  publicUrl?: string
 }
 
 /** Simple in-memory limit on failed sign-ins per email, to slow down password guessing. */
@@ -46,7 +49,7 @@ function createSignInLimiter(maxFailures = 10, windowMs = 15 * 60 * 1000) {
   }
 }
 
-export function createApp({ db, events, secureCookies = false }: AppOptions) {
+export function createApp({ db, events, secureCookies = false, publicUrl }: AppOptions) {
   const app = new Hono<Env>().basePath('/api')
   const limiter = createSignInLimiter()
 
@@ -64,8 +67,9 @@ export function createApp({ db, events, secureCookies = false }: AppOptions) {
   // this stops other sites from acting as a signed-in user. Requests with an
   // API key are exempt: browsers can't add that header cross-site either,
   // and automation tools often send a DELETE with no body.
+  // OAuth endpoints follow their own rules (form posts, with a CSRF token on the consent page).
   app.use(async (c, next) => {
-    if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && apiKeyOf(c) === undefined) {
+    if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && apiKeyOf(c) === undefined && !c.req.path.startsWith('/api/oauth/')) {
       if (!c.req.header('content-type')?.startsWith('application/json')) fail(400, 'Expected JSON')
     }
     await next()
@@ -106,7 +110,8 @@ export function createApp({ db, events, secureCookies = false }: AppOptions) {
   async function currentUser(c: Context): Promise<User | null> {
     const apiKey = apiKeyOf(c)
     if (apiKey !== undefined) {
-      // With an API key, only the key counts, not a session cookie that came along.
+      // With an API key or OAuth token, only that counts, not a session cookie that came along.
+      if (apiKey.startsWith(oauth.ACCESS_TOKEN_PREFIX)) return oauth.userForAccessToken(db, apiKey)
       if (!apiKey.startsWith(API_KEY_PREFIX)) return null
       const { rows } = await db.query<User & { key_id: string; last_used_at: Date | null }>(
         `select u.id, u.email, k.id as key_id, k.last_used_at from kanban.api_keys k
@@ -120,6 +125,10 @@ export function createApp({ db, events, secureCookies = false }: AppOptions) {
       }
       return { id: row.id, email: row.email }
     }
+    return sessionUser(c)
+  }
+
+  async function sessionUser(c: Context): Promise<User | null> {
     const token = getCookie(c, SESSION_COOKIE)
     if (!token) return null
     const { rows } = await db.query<User>(
@@ -178,10 +187,24 @@ export function createApp({ db, events, secureCookies = false }: AppOptions) {
 
   app.get('/v1/openapi.json', (c) => c.json(openApiSpec()))
 
-  // Everything below needs a signed-in user, or an API key.
+  app.route(
+    '/oauth',
+    oauth.oauthRoutes({ db, secureCookies, publicUrl, sessionUser, startSession, signInLimiter: limiter }),
+  )
+
+  // Everything below needs a signed-in user, an API key or an OAuth access token.
   app.use(async (c, next) => {
     const user = await currentUser(c)
     if (!user) {
+      // Tells MCP clients such as Claude where to sign in.
+      if (c.req.path === '/api/mcp') {
+        const metadata = oauth.protectedResourceMetadataUrl(oauth.publicOrigin(c, publicUrl))
+        c.header(
+          'WWW-Authenticate',
+          `Bearer resource_metadata="${metadata}"${apiKeyOf(c) !== undefined ? ', error="invalid_token"' : ''}`,
+        )
+      }
+      if (apiKeyOf(c)?.startsWith(oauth.ACCESS_TOKEN_PREFIX)) fail(401, 'The access token is invalid or expired')
       if (apiKeyOf(c) !== undefined) fail(401, 'Unknown or revoked API key')
       fail(401, 'Sign in first')
     }
@@ -221,6 +244,17 @@ export function createApp({ db, events, secureCookies = false }: AppOptions) {
       [c.get('user').id, name, hashToken(key)],
     )
     return c.json({ id: rows[0].id, name, createdAt: new Date(rows[0].created_at).toISOString(), lastUsedAt: null, key })
+  })
+
+  app.get('/connected-apps', async (c) => {
+    sessionOnly(c)
+    return c.json(await oauth.listConnectedApps(db, c.get('user').id))
+  })
+
+  app.delete('/connected-apps/:id', async (c) => {
+    sessionOnly(c)
+    await oauth.disconnectApp(db, c.get('user').id, c.req.param('id'))
+    return c.json({ ok: true })
   })
 
   app.delete('/api-keys/:id', async (c) => {
@@ -542,5 +576,9 @@ export function createApp({ db, events, secureCookies = false }: AppOptions) {
     }),
   )
 
-  return app
+  // The site root adds the OAuth discovery documents that MCP clients look for.
+  const root = new Hono()
+  root.route('/', oauth.wellKnownRoutes({ publicUrl }))
+  root.route('/', app)
+  return root
 }

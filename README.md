@@ -13,7 +13,7 @@ A kanban board for work and daily life. It works in the browser with no account,
 - **Backup**: export all boards to JSON and import them again.
 - **Light and dark themes**, following the system by default.
 - **Accounts and sharing** (optional, with your own Postgres): sign in with an email and password, keep boards in your account on every device, invite people by email or with a link as editors or viewers, accept or decline invitations, change roles, remove people or leave a board. Shared boards update live.
-- **Automation** (with accounts): API keys, a REST API and an MCP server, so n8n, scripts and AI agents can manage boards.
+- **Automation** (with accounts): API keys, a REST API and an MCP server, so n8n, scripts and AI agents can manage boards. Claude connects with a sign-in, no key needed.
 - **Keyboard shortcuts**: `/` search, `N` new card, `F` filters, `Enter` open card, `Space` pick up and drop, `?` list them all.
 
 ## Getting started
@@ -60,6 +60,7 @@ How it works:
 | `DATABASE_URL` | Postgres connection string. Required by the server. |
 | `PORT` | Port for the server (default 8787). |
 | `COOKIE_SECURE` | Set to `true` when serving over https, so the session cookie is https-only. |
+| `PUBLIC_URL` | The site's public address, e.g. `https://workstream.teddybiere.info`, used in OAuth discovery for Claude. Optional: by default it comes from the request and proxy headers. |
 | `VITE_API_URL` | Where the app looks for the API (default `/api`). Set it only when the server runs on another address; `off` turns accounts off. |
 
 Behind a reverse proxy, forward `/api` to the server and keep the app on the same origin, so the session cookie is sent.
@@ -86,6 +87,18 @@ Send the key in an `X-API-Key: kbn_...` header (`Authorization: Bearer kbn_...` 
 | `GET` / `PATCH` / `DELETE /api/v1/cards/{cardId}` | Read, change or delete a card. `PATCH {"column": "Done"}` moves it; fields you leave out stay as they are |
 
 Columns can be named by title (any case), labels by name; a label name the board doesn't have yet becomes a new label. Positions start at 0 (top or left); leaving `position` out puts the item at the end. Changes appear live in the app for everyone on the board.
+
+### Claude (custom connector)
+
+Claude connects to the MCP server with OAuth, so there is no key to paste: you sign in with your app account and allow it.
+
+1. In Claude, open **Settings → Connectors → Add custom connector**.
+2. Enter a name and the URL `https://your-domain/api/mcp`. Leave the OAuth Client ID and secret empty.
+3. Click **Connect**. A TodoList Kanban page opens: sign in (if you aren't already) and click **Allow**.
+
+Claude then acts as you, with your role on each board. The app lists it under **Connected apps** in the **API keys…** dialog, where **Disconnect** stops its access at once. Resetting someone's password also disconnects their apps.
+
+How it works: `/api/mcp` answers unauthenticated requests with `401` and a `WWW-Authenticate` header pointing at `/.well-known/oauth-protected-resource/api/mcp`. The server is its own OAuth 2.1 authorization server (`/.well-known/oauth-authorization-server`) with dynamic client registration, the authorization code flow with PKCE (S256), one-hour access tokens and rotating refresh tokens. Only hashes of codes, tokens and client secrets are stored. The server works out its public address from the proxy's `X-Forwarded-Proto` and `X-Forwarded-Host` headers; set `PUBLIC_URL` if that comes out wrong.
 
 ### n8n setup
 
@@ -124,7 +137,8 @@ src/
   components/         Board, Column, CardItem, CardModal, FilterBar, Sharing, ...
 server/
   src/                API server: accounts, boards, members, invites, live updates,
-                      API keys, REST API (rest.ts, openapi.ts) and MCP server (mcp.ts)
+                      API keys, REST API (rest.ts, openapi.ts), MCP server (mcp.ts)
+                      and OAuth for MCP clients such as Claude (oauth.ts)
   migrations/         Database schema, applied on start
   tests/              API tests, run against a real Postgres engine (PGlite)
 ```

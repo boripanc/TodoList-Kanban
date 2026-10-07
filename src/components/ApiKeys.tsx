@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import type { ApiKey } from '../cloud/api'
+import type { ApiKey, ConnectedApp } from '../cloud/api'
 import { apiBaseUrl } from '../cloud/config'
 import type { Cloud } from '../cloud/context'
 import { Modal } from './Modal'
@@ -10,6 +10,7 @@ const when = (iso: string) => new Date(iso).toLocaleDateString(undefined, { date
 export function ApiKeysDialog({ cloud, onClose }: { cloud: Cloud; onClose: () => void }) {
   const { api, reportError } = cloud
   const [keys, setKeys] = useState<ApiKey[]>([])
+  const [apps, setApps] = useState<ConnectedApp[]>([])
   const [name, setName] = useState('')
   const [created, setCreated] = useState<{ name: string; key: string } | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
@@ -17,7 +18,9 @@ export function ApiKeysDialog({ cloud, onClose }: { cloud: Cloud; onClose: () =>
 
   const load = useCallback(async () => {
     try {
-      setKeys(await api.listApiKeys())
+      const [k, a] = await Promise.all([api.listApiKeys(), api.listConnectedApps()])
+      setKeys(k)
+      setApps(a)
     } catch (e) {
       reportError(e)
     }
@@ -45,6 +48,16 @@ export function ApiKeysDialog({ cloud, onClose }: { cloud: Cloud; onClose: () =>
     if (!window.confirm(`Revoke “${apiKey.name}”? Anything using it stops working.`)) return
     try {
       await api.revokeApiKey(apiKey.id)
+    } catch (e) {
+      reportError(e)
+    }
+    await load()
+  }
+
+  const disconnect = async (app: ConnectedApp) => {
+    if (!window.confirm(`Disconnect “${app.name}”? It loses access to your boards right away.`)) return
+    try {
+      await api.disconnectApp(app.id)
     } catch (e) {
       reportError(e)
     }
@@ -132,6 +145,30 @@ export function ApiKeysDialog({ cloud, onClose }: { cloud: Cloud; onClose: () =>
         )}
       </section>
 
+      <section className="share-section" aria-label="Connected apps">
+        <h3>Connected apps</h3>
+        {apps.length === 0 ? (
+          <p className="muted small">No apps connected. Apps such as Claude appear here after you allow them.</p>
+        ) : (
+          <ul className="share-list">
+            {apps.map((app) => (
+              <li key={app.id}>
+                <div className="share-who">
+                  <strong>{app.name}</strong>
+                  <small className="muted">
+                    Connected {when(app.connectedAt)} ·{' '}
+                    {app.lastUsedAt ? `last used ${when(app.lastUsedAt)}` : 'never used'}
+                  </small>
+                </div>
+                <button className="button ghost" aria-label={`Disconnect ${app.name}`} onClick={() => disconnect(app)}>
+                  Disconnect
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       <section className="share-section" aria-label="Connect">
         <h3>Connect</h3>
         <ul className="share-list">
@@ -146,6 +183,10 @@ export function ApiKeysDialog({ cloud, onClose }: { cloud: Cloud; onClose: () =>
           </a>
           . In n8n, use a Header Auth credential with the name <code>X-API-Key</code>, on an HTTP Request node or the
           MCP Client tool.
+        </p>
+        <p className="muted small">
+          In Claude, add a custom connector with the MCP server address above. You sign in here and allow it, with no
+          key to copy.
         </p>
       </section>
     </Modal>

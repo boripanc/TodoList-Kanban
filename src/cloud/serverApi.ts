@@ -1,4 +1,4 @@
-import type { ApiKey, CloudApi, CloudUser, Member, ReceivedInvite, SentInvite } from './api'
+import type { ApiKey, CloudApi, ConnectedApp, CloudUser, Member, ReceivedInvite, SentInvite } from './api'
 import { boardRow, cardRows, columnRows, docFromRows, type BoardRow, type CardRow, type ColumnRow } from './doc'
 
 /** No answer from the server yet: it may still be starting. */
@@ -133,6 +133,10 @@ export function createServerApi(base: string): CloudApi {
     createApiKey: (name) => call<ApiKey & { key: string }>('POST', '/api-keys', { name }),
     async revokeApiKey(keyId) {
       await call('DELETE', `/api-keys/${enc(keyId)}`)
+    },
+    listConnectedApps: () => call<ConnectedApp[]>('GET', '/connected-apps'),
+    async disconnectApp(appId) {
+      await call('DELETE', `/connected-apps/${enc(appId)}`)
     },
 
     subscribe(_userId, { onBoard, onMembership }) {
