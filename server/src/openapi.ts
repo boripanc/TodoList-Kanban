@@ -59,6 +59,7 @@ const cardFields = {
       ],
     },
   },
+  progress: { type: 'integer', minimum: 0, maximum: 100, nullable: true, description: 'Percent done; null stops tracking' },
   column: { type: 'string', description: 'Column id or title' },
   position: { type: 'integer', minimum: 0, description: '0 = top of the column; default the bottom' },
 }
@@ -178,6 +179,22 @@ export function openApiSpec() {
         },
         delete: { summary: 'Delete a card', operationId: 'deleteCard', responses: { 200: ok, ...errors } },
       },
+      '/cards/{cardId}/progress': {
+        parameters: [cardId],
+        post: {
+          summary: 'Add a progress update',
+          description: 'Logs what was done and/or a new progress percentage, which also becomes the card progress.',
+          operationId: 'addProgressNote',
+          requestBody: body({
+            type: 'object',
+            properties: {
+              text: { type: 'string', description: 'What was done or what changed' },
+              progress: { type: 'integer', minimum: 0, maximum: 100 },
+            },
+          }),
+          responses: { 201: json(ref('Card'), 'Added'), ...errors },
+        },
+      },
     },
     components: {
       securitySchemes: {
@@ -243,6 +260,20 @@ export function openApiSpec() {
             checklist: {
               type: 'array',
               items: { type: 'object', properties: { id: { type: 'string' }, text: { type: 'string' }, done: { type: 'boolean' } } },
+            },
+            progress: { type: 'integer', minimum: 0, maximum: 100, nullable: true, description: 'Percent done; null when not tracked' },
+            progressLog: {
+              type: 'array',
+              description: 'Progress updates, oldest first',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'string' },
+                  text: { type: 'string' },
+                  progress: { type: 'integer', nullable: true },
+                  at: { type: 'string', format: 'date-time' },
+                },
+              },
             },
             createdAt: { type: 'string', format: 'date-time' },
             updatedAt: { type: 'string', format: 'date-time' },

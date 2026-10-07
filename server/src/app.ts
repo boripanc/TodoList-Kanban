@@ -348,12 +348,15 @@ export function createApp({ db, events, secureCookies = false, publicUrl }: AppO
     for (const card of cards) {
       const { rows } = await q.query(
         `insert into kanban.cards (id, board_id, column_id, position, title, description, label_ids, priority,
-           due_date, checklist, created_at, updated_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           due_date, checklist, created_at, updated_at, progress, progress_log)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          on conflict (id) do update set column_id = excluded.column_id, position = excluded.position,
            title = excluded.title, description = excluded.description, label_ids = excluded.label_ids,
            priority = excluded.priority, due_date = excluded.due_date, checklist = excluded.checklist,
-           updated_at = excluded.updated_at
+           updated_at = excluded.updated_at,
+           -- Apps from before progress existed don't send it; keep what is stored.
+           progress = case when $15::boolean then excluded.progress else kanban.cards.progress end,
+           progress_log = case when $15::boolean then excluded.progress_log else kanban.cards.progress_log end
          where kanban.cards.board_id = excluded.board_id
          returning id`,
         [
@@ -369,6 +372,9 @@ export function createApp({ db, events, secureCookies = false, publicUrl }: AppO
           JSON.stringify(card.checklist),
           card.created_at,
           card.updated_at,
+          card.progress ?? null,
+          JSON.stringify(card.progress_log ?? []),
+          card.progress !== undefined,
         ],
       )
       if (!rows[0]) fail(409, 'That card id is already in use')

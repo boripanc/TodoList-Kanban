@@ -55,6 +55,12 @@ const checklist = {
   },
   description: 'Checklist items, as text or {text, done}. Replaces the whole checklist.',
 }
+const progress = {
+  type: ['integer', 'null'],
+  minimum: 0,
+  maximum: 100,
+  description: 'How far along the task is, 0-100 percent; null stops tracking progress.',
+}
 const cardFields = {
   title: text('Card title.'),
   description: text('Notes (plain text).'),
@@ -62,6 +68,7 @@ const cardFields = {
   dueDate,
   labels,
   checklist,
+  progress,
 }
 
 export const tools: Tool[] = [
@@ -156,7 +163,7 @@ export const tools: Tool[] = [
       column: text('Only this column (id or title).'),
       label: text('Only cards with this label (name or id).'),
       priority,
-      search: text('Text in the title, notes or checklist.'),
+      search: text('Text in the title, notes, checklist or progress updates.'),
       dueFrom: text('Due on or after this date, YYYY-MM-DD.'),
       dueTo: text('Due on or before this date, YYYY-MM-DD. Use today for overdue and due today.'),
       limit: { type: 'integer', minimum: 1, maximum: 500, description: 'Most cards to return (default 100).' },
@@ -167,7 +174,7 @@ export const tools: Tool[] = [
   {
     name: 'get_card',
     title: 'Get a card',
-    description: 'Get one card with its column, labels and checklist.',
+    description: 'Get one card with its column, labels, checklist, progress and progress updates.',
     inputSchema: object({ cardId }, ['cardId']),
     annotations: { readOnlyHint: true },
     run: (db, user, a) => k.getCard(db, user, v.ref(a.cardId, 'cardId')),
@@ -207,6 +214,21 @@ export const tools: Tool[] = [
     annotations: { idempotentHint: true },
     run: (db, user, a) =>
       k.updateCard(db, user, v.ref(a.cardId, 'cardId'), v.cardInput({ column: a.column, position: a.position }, false)),
+  },
+  {
+    name: 'add_progress_note',
+    title: 'Add a progress update',
+    description:
+      'Log a progress update on a card: what was done, and/or a new progress percentage (0-100), which also becomes the card progress. Updates are kept with their time.',
+    inputSchema: object(
+      { cardId, text: text('What was done or what changed.'), progress: { ...progress, type: 'integer' } },
+      ['cardId'],
+    ),
+    annotations: {},
+    run: (db, user, a) => {
+      const { cardId: id, ...rest } = a
+      return k.addProgressNote(db, user, v.ref(id, 'cardId'), v.progressNoteInput(rest))
+    },
   },
   {
     name: 'delete_card',

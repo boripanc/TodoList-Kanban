@@ -20,7 +20,7 @@ export function isFilterActive(filter: CardFilter): boolean {
 export function matchesFilter(card: Card, filter: CardFilter, now: Date = new Date()): boolean {
   const query = filter.query.trim().toLowerCase()
   if (query) {
-    const haystack = [card.title, card.description, ...card.checklist.map((i) => i.text)]
+    const haystack = [card.title, card.description, ...card.checklist.map((i) => i.text), ...card.progressLog.map((e) => e.text)]
       .join('\n')
       .toLowerCase()
     if (!haystack.includes(query)) return false

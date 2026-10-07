@@ -139,7 +139,15 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
       const board = server.boards.get(boardId)!
       if (ops.board) Object.assign(board, structuredClone(ops.board))
       for (const row of ops.upsertColumns) server.columns.set(row.id, structuredClone(row))
-      for (const row of ops.upsertCards) server.cards.set(row.id, structuredClone(row))
+      for (const row of ops.upsertCards) {
+        // Like the server: a row without progress (from an older app) keeps the progress already stored.
+        const previous = server.cards.get(row.id)
+        const progress =
+          row.progress === undefined
+            ? { progress: previous?.progress ?? null, progress_log: previous?.progress_log ?? [] }
+            : {}
+        server.cards.set(row.id, structuredClone({ ...row, ...progress }))
+      }
       for (const id of ops.deleteCardIds) server.cards.delete(id)
       for (const id of ops.deleteColumnIds) {
         server.columns.delete(id)

@@ -53,6 +53,21 @@ export function CardView({ card, labels, overlay }: CardViewProps) {
           )}
         </div>
       )}
+      {card.progress !== null && (
+        <div
+          className={`card-progress ${card.progress === 100 ? 'complete' : ''}`}
+          role="progressbar"
+          aria-label="Progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={card.progress}
+        >
+          <div className="progress">
+            <div className="progress-bar" style={{ width: `${card.progress}%` }} />
+          </div>
+          <span>{card.progress}%</span>
+        </div>
+      )}
     </div>
   )
 }

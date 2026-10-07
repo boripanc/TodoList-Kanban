@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import type { CardRow } from '../../src/cloud/doc.ts'
 import { canEdit, canRead, fail, requireRole, type Role, type User } from './access.ts'
 import type { Db, Queryable } from './db.ts'
-import type { CardInput, CardQuery, ColumnInput, NewBoardInput } from './validate.ts'
+import type { CardInput, CardQuery, ColumnInput, NewBoardInput, ProgressNoteInput } from './validate.ts'
 
 export interface ApiLabel {
   id: string
@@ -26,6 +26,10 @@ export interface ApiCard {
   dueDate: string | null
   labels: ApiLabel[]
   checklist: { id: string; text: string; done: boolean }[]
+  /** 0-100, or null when the card doesn't track progress. */
+  progress: number | null
+  /** Progress updates, oldest first. */
+  progressLog: { id: string; text: string; progress: number | null; at: string }[]
   createdAt: string
   updatedAt: string
 }
@@ -79,6 +83,8 @@ function toApiCard(row: CardDbRow, column: { id: string; title: string }, labels
     dueDate: row.due_date,
     labels: row.label_ids.flatMap((id) => byId.get(id) ?? []),
     checklist: row.checklist,
+    progress: row.progress ?? null,
+    progressLog: (row.progress_log ?? []).map((e) => ({ ...e, at: iso(e.at) })),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   }
@@ -372,8 +378,8 @@ export async function createCard(db: Db, user: User, boardId: string, input: Car
     const now = Date.now()
     await tx.query(
       `insert into kanban.cards (id, board_id, column_id, position, title, description, label_ids, priority, due_date,
-         checklist, created_at, updated_at)
-       values ($1, $2, $3, 0, $4, $5, $6, $7, $8, $9, $10, $10)`,
+         checklist, created_at, updated_at, progress)
+       values ($1, $2, $3, 0, $4, $5, $6, $7, $8, $9, $10, $10, $11)`,
       [
         id,
         boardId,
@@ -385,6 +391,7 @@ export async function createCard(db: Db, user: User, boardId: string, input: Car
         input.dueDate ?? null,
         JSON.stringify(checklistFrom(input.checklist ?? [])),
         now,
+        input.progress ?? null,
       ],
     )
     await placeCard(tx, boardId, id, column.id, input.position)
@@ -401,7 +408,7 @@ export async function updateCard(db: Db, user: User, cardId: string, input: Card
     const labelIds = input.labels ? await resolveLabels(tx, boardId, input.labels) : card.label_ids
     await tx.query(
       `update kanban.cards set title = $2, description = $3, priority = $4, due_date = $5, label_ids = $6,
-         checklist = $7, updated_at = $8
+         checklist = $7, updated_at = $8, progress = $9
        where id = $1`,
       [
         cardId,
@@ -412,6 +419,7 @@ export async function updateCard(db: Db, user: User, cardId: string, input: Card
         JSON.stringify(labelIds),
         JSON.stringify(input.checklist ? checklistFrom(input.checklist, card.checklist) : card.checklist),
         Date.now(),
+        input.progress === undefined ? card.progress : input.progress,
       ],
     )
     if (input.column !== undefined || input.position !== undefined) {
@@ -419,6 +427,22 @@ export async function updateCard(db: Db, user: User, cardId: string, input: Card
       await placeCard(tx, boardId, cardId, columnId, input.position)
       if (columnId !== card.column_id) await renumberCards(tx, boardId, card.column_id)
     }
+    return boardId
+  })
+  return cardOf(db, boardId, cardId)
+}
+
+/** Add a progress update to a card; a given progress also becomes the card's progress. */
+export async function addProgressNote(db: Db, user: User, cardId: string, input: ProgressNoteInput): Promise<ApiCard> {
+  const boardId = await db.transaction(async (tx) => {
+    const boardId = await cardBoard(tx, user, cardId, canEdit)
+    const now = Date.now()
+    const entry = { id: randomUUID(), text: input.text, progress: input.progress ?? null, at: now }
+    await tx.query(
+      `update kanban.cards set progress_log = progress_log || $2::jsonb, progress = coalesce($3, progress), updated_at = $4
+       where id = $1`,
+      [cardId, JSON.stringify([entry]), input.progress ?? null, now],
+    )
     return boardId
   })
   return cardOf(db, boardId, cardId)
@@ -456,7 +480,7 @@ export async function findCards(db: Db, user: User, query: CardQuery): Promise<A
   if (query.dueTo) where.push(`c.due_date <= ${param(query.dueTo)}`)
   if (query.search) {
     const p = param(`%${query.search.replace(/[\\%_]/g, (m) => `\\${m}`)}%`)
-    where.push(`(c.title ilike ${p} or c.description ilike ${p} or c.checklist::text ilike ${p})`)
+    where.push(`(c.title ilike ${p} or c.description ilike ${p} or c.checklist::text ilike ${p} or c.progress_log::text ilike ${p})`)
   }
   const { rows } = await db.query<CardDbRow & { column_title: string; labels: ApiLabel[] }>(
     `select c.*, col.title as column_title, b.labels

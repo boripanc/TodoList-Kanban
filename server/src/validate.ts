@@ -1,4 +1,5 @@
 import type { BoardOps, BoardRow, CardRow, ColumnRow } from '../../src/cloud/doc.ts'
+import type { ProgressEntry } from '../../src/types.ts'
 
 /** Thrown for a request body that doesn't have the expected shape; becomes a 400. */
 export class BadRequest extends Error {}
@@ -26,6 +27,13 @@ function id(value: unknown, what: string): string {
 function int(value: unknown, what: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value)) throw new BadRequest(`${what} must be a whole number`)
   return value
+}
+
+function percent(value: unknown, what: string): number | null {
+  if (value === null) return null
+  const n = int(value, what)
+  if (n < 0 || n > 100) throw new BadRequest(`${what} must be from 0 to 100`)
+  return n
 }
 
 function arr(value: unknown, what: string, max = 1000): unknown[] {
@@ -82,8 +90,25 @@ export function cardRow(value: unknown, boardId: string): CardRow {
       if (typeof i.done !== 'boolean') throw new BadRequest('checklist done must be true or false')
       return { id: id(i.id, 'checklist id'), text: str(i.text, 'checklist text', 1000), done: i.done }
     }),
+    // Apps from before progress existed leave both out; the database then keeps what it has.
+    ...(c.progress === undefined
+      ? {}
+      : {
+          progress: percent(c.progress, 'progress'),
+          progress_log: arr(c.progress_log ?? [], 'progress_log', 1000).map(progressEntry),
+        }),
     created_at: int(c.created_at, 'created_at'),
     updated_at: int(c.updated_at, 'updated_at'),
+  }
+}
+
+function progressEntry(value: unknown): ProgressEntry {
+  const e = obj(value, 'progress entry')
+  return {
+    id: id(e.id, 'progress entry id'),
+    text: str(e.text, 'progress text', 5000),
+    progress: percent(e.progress, 'progress'),
+    at: int(e.at, 'progress at'),
   }
 }
 
@@ -145,6 +170,14 @@ export interface CardInput {
   /** Label ids or names; unknown names become new labels. */
   labels?: string[]
   checklist?: { text: string; done: boolean }[]
+  /** 0-100, or null to stop tracking. */
+  progress?: number | null
+}
+
+export interface ProgressNoteInput {
+  text: string
+  /** Also sets the card's progress. */
+  progress?: number | null
 }
 
 export interface CardQuery {
@@ -244,7 +277,17 @@ export function cardInput(value: unknown, isNew: boolean): CardInput {
         return { text: title(i.text, 'checklist text', 1000), done: i.done === true }
       }),
     ),
+    progress: optional(c.progress, (v) => percent(v, 'progress')),
   }
+}
+
+export function progressNoteInput(value: unknown): ProgressNoteInput {
+  const n = obj(value, 'progress update')
+  const text = optional(n.text, (v) => str(v, 'text', 5000).trim()) ?? ''
+  const progress = optional(n.progress, (v) => percent(v, 'progress'))
+  if (!text && (progress === undefined || progress === null))
+    throw new BadRequest('Give the update text, a progress from 0 to 100, or both')
+  return { text, progress }
 }
 
 /** Card filters, from a query string (all text) or from MCP tool arguments. */

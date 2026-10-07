@@ -63,6 +63,9 @@ export function restApi(db: Db) {
   api.patch('/cards/:cardId', async (c) =>
     c.json(await k.updateCard(db, user(c), c.req.param('cardId'), v.cardInput(await body(c), false))),
   )
+  api.post('/cards/:cardId/progress', async (c) =>
+    c.json(await k.addProgressNote(db, user(c), c.req.param('cardId'), v.progressNoteInput(await body(c))), 201),
+  )
   api.delete('/cards/:cardId', async (c) => {
     await k.deleteCard(db, user(c), c.req.param('cardId'))
     return c.json({ ok: true })

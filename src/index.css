@@ -611,6 +611,53 @@ small.due-hint {
   background: var(--ok);
   transition: width 0.2s;
 }
+.card-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.card-progress .progress {
+  flex: 1;
+}
+.card-progress .progress-bar {
+  background: var(--accent);
+}
+.card-progress.complete .progress-bar {
+  background: var(--ok);
+}
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.progress-row input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+.progress-number {
+  width: 4.5em;
+}
+.progress-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.progress-log li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.progress-log-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .checklist {
   list-style: none;
   margin: 0;
