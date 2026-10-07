@@ -184,6 +184,8 @@ export function oauthRoutes(opts: OAuthOptions) {
   app.use('/token', cors())
 
   const oauthError = (c: Context, error: string, description: string, status: 400 | 401 = 400) => {
+    // Logged so a failed connection shows up in the server logs; never includes codes, tokens or secrets.
+    console.log(`OAuth ${c.req.method} ${c.req.path} -> ${status} ${error}: ${description}`)
     c.header('Cache-Control', 'no-store')
     return c.json({ error, error_description: description }, status)
   }
@@ -205,6 +207,7 @@ export function oauthRoutes(opts: OAuthOptions) {
       `insert into kanban.oauth_clients (id, secret_hash, name, redirect_uris) values ($1, $2, $3, $4) returning created_at`,
       [id, secret && hashToken(secret), registration.name, JSON.stringify(registration.redirectUris)],
     )
+    console.log(`OAuth client registered: ${registration.name} (${registration.authMethod})`)
     c.header('Cache-Control', 'no-store')
     return c.json(
       {
@@ -252,6 +255,7 @@ export function oauthRoutes(opts: OAuthOptions) {
       url.searchParams.set('error_description', description)
       if (state !== undefined) url.searchParams.set('state', state)
       url.searchParams.set('iss', publicOrigin(c, opts.publicUrl))
+      console.log(`OAuth ${c.req.method} ${c.req.path} -> ${error}: ${description}`)
       return { ok: false as const, redirect: url.href }
     }
     if (params.response_type !== 'code') return back('unsupported_response_type', 'Only response_type=code is supported')
@@ -301,14 +305,22 @@ export function oauthRoutes(opts: OAuthOptions) {
 
   app.get('/authorize', async (c) => {
     const request = await checkRequest(c, c.req.query())
-    if (!request.ok) return 'page' in request ? c.html(errorPage(request.page), 400) : c.redirect(request.redirect)
+    if (!request.ok) {
+      if ('redirect' in request) return c.redirect(request.redirect)
+      console.log(`OAuth ${c.req.method} ${c.req.path} -> 400: ${request.page}`)
+      return c.html(errorPage(request.page), 400)
+    }
     return render(c, request, await opts.sessionUser(c))
   })
 
   app.post('/authorize', async (c) => {
     const form = (await c.req.parseBody()) as Record<string, unknown>
     const request = await checkRequest(c, form)
-    if (!request.ok) return 'page' in request ? c.html(errorPage(request.page), 400) : c.redirect(request.redirect)
+    if (!request.ok) {
+      if ('redirect' in request) return c.redirect(request.redirect)
+      console.log(`OAuth ${c.req.method} ${c.req.path} -> 400: ${request.page}`)
+      return c.html(errorPage(request.page), 400)
+    }
 
     // The form must come from the page this server rendered, not another site.
     const cookie = getCookie(c, CSRF_COOKIE)
@@ -319,6 +331,7 @@ export function oauthRoutes(opts: OAuthOptions) {
     if (request.fields.state !== undefined) back.searchParams.set('state', request.fields.state)
     back.searchParams.set('iss', publicOrigin(c, opts.publicUrl))
     if (form.decision !== 'allow') {
+      console.log(`OAuth ${request.client.name}: the person chose not to allow it`)
       back.searchParams.set('error', 'access_denied')
       return c.redirect(back.href)
     }
@@ -357,6 +370,7 @@ export function oauthRoutes(opts: OAuthOptions) {
        values ($1, $2, $3, $4, $5, $6, now() + interval '${CODE_SECONDS} seconds')`,
       [hashToken(code), request.client.id, user.id, request.redirectUri, request.fields.code_challenge, request.fields.scope],
     )
+    console.log(`OAuth ${request.client.name}: allowed, returning to ${back.host}`)
     back.searchParams.set('code', code)
     return c.redirect(back.href)
   })
@@ -378,6 +392,7 @@ export function oauthRoutes(opts: OAuthOptions) {
         [hashToken(access), hashToken(refresh), userId, clientId, scope],
       )
     })
+    console.log(`OAuth tokens issued to client ${clientId.slice(0, 8)}…`)
     c.header('Cache-Control', 'no-store')
     return c.json({
       access_token: access,

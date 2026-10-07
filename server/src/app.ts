@@ -204,6 +204,10 @@ export function createApp({ db, events, secureCookies = false, publicUrl }: AppO
           `Bearer resource_metadata="${metadata}"${apiKeyOf(c) !== undefined ? ', error="invalid_token"' : ''}`,
         )
       }
+      if (apiKeyOf(c) !== undefined && c.req.path.startsWith('/api/mcp')) {
+        const kind = apiKeyOf(c)!.startsWith(oauth.ACCESS_TOKEN_PREFIX) ? 'OAuth access token' : 'API key'
+        console.log(`MCP refused: unknown, expired or disconnected ${kind}`)
+      }
       if (apiKeyOf(c)?.startsWith(oauth.ACCESS_TOKEN_PREFIX)) fail(401, 'The access token is invalid or expired')
       if (apiKeyOf(c) !== undefined) fail(401, 'Unknown or revoked API key')
       fail(401, 'Sign in first')
