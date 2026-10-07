@@ -248,4 +248,32 @@ describe('accounts and sharing', () => {
     })
     expect(await screen.findByRole('option', { name: 'Trip to Japan · can edit' })).toBeInTheDocument()
   })
+  it('creates an API token for n8n, shows it once, and revokes it', async () => {
+    const user = userEvent.setup()
+    const server = new MemoryServer()
+    renderWithCloud(server.client(server.addUser('ana@example.com')))
+    await user.click(await screen.findByRole('button', { name: 'Account: ana@example.com' }))
+    await user.click(screen.getByRole('menuitem', { name: 'API tokens…' }))
+    const dialog = screen.getByRole('dialog', { name: 'API tokens' })
+    expect(within(dialog).getByText('No tokens yet.')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('REST API')).toHaveValue(`${window.location.origin}/api/v1`)
+    expect(within(dialog).getByLabelText('MCP server')).toHaveValue(`${window.location.origin}/api/mcp`)
+
+    await user.type(within(dialog).getByLabelText('Token name'), 'n8n')
+    await user.click(within(dialog).getByRole('button', { name: 'Create token' }))
+    expect(await within(dialog).findByLabelText('Your new token')).toHaveValue(server.apiTokens[0].token)
+    expect(within(dialog).getByText(/won’t be shown again/)).toBeInTheDocument()
+    expect(await within(dialog).findByText('n8n')).toBeInTheDocument()
+    expect(within(dialog).getByText(/never used/)).toBeInTheDocument()
+
+    const confirm = window.confirm
+    window.confirm = () => true
+    try {
+      await user.click(within(dialog).getByRole('button', { name: 'Revoke n8n' }))
+    } finally {
+      window.confirm = confirm
+    }
+    expect(await within(dialog).findByText('No tokens yet.')).toBeInTheDocument()
+    expect(server.apiTokens).toEqual([])
+  })
 })

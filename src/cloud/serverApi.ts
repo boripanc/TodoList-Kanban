@@ -1,4 +1,4 @@
-import type { CloudApi, CloudUser, Member, ReceivedInvite, SentInvite } from './api'
+import type { ApiToken, CloudApi, CloudUser, Member, ReceivedInvite, SentInvite } from './api'
 import { boardRow, cardRows, columnRows, docFromRows, type BoardRow, type CardRow, type ColumnRow } from './doc'
 
 /** No answer from the server yet: it may still be starting. */
@@ -127,6 +127,12 @@ export function createServerApi(base: string): CloudApi {
     },
     async joinWithLink(token) {
       return (await call<{ boardId: string }>('POST', '/join', { token })).boardId
+    },
+
+    listTokens: () => call<ApiToken[]>('GET', '/tokens'),
+    createToken: (name) => call<ApiToken & { token: string }>('POST', '/tokens', { name }),
+    async revokeToken(tokenId) {
+      await call('DELETE', `/tokens/${enc(tokenId)}`)
     },
 
     subscribe(_userId, { onBoard, onMembership }) {

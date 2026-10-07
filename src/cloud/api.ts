@@ -29,6 +29,14 @@ export interface ReceivedInvite {
   invitedBy: string
 }
 
+/** A personal API token, for automation tools such as n8n. The token itself is only shown once, on creation. */
+export interface ApiToken {
+  id: string
+  name: string
+  createdAt: string
+  lastUsedAt: string | null
+}
+
 /** Everything the app needs from the backend. The app's own server in production, in memory in tests. */
 export interface CloudApi {
   getUser(): Promise<CloudUser | null>
@@ -62,6 +70,11 @@ export interface CloudApi {
   declineInvite(inviteId: string): Promise<void>
   /** Returns the board id. */
   joinWithLink(token: string): Promise<string>
+
+  listTokens(): Promise<ApiToken[]>
+  /** Returns the new token's details and the secret token, which can't be read again later. */
+  createToken(name: string): Promise<ApiToken & { token: string }>
+  revokeToken(tokenId: string): Promise<void>
 
   /**
    * Listen for changes made elsewhere: `onBoard` when a board's content changes,
