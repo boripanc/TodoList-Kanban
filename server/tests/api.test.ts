@@ -798,6 +798,18 @@ describe('OAuth for MCP clients', () => {
     const boards = JSON.parse(((await tools.json()) as any).result.content[0].text)
     expect(boards).toEqual([expect.objectContaining({ id: 'b1', role: 'owner' })])
 
+    // A stale API key in an extra header doesn't block the OAuth token that comes with it.
+    const both = await app.request('/api/mcp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': 'kbn_revoked',
+        authorization: `Bearer ${issued.data.access_token}`,
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }),
+    })
+    expect(both.status).toBe(200)
+
     const refreshed = await token({
       grant_type: 'refresh_token',
       refresh_token: issued.data.refresh_token,
