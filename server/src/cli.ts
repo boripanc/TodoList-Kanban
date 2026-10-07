@@ -25,10 +25,10 @@ const { rows } = await db.query<{ id: string }>(
   [email, await hashPassword(password)],
 )
 if (rows[0]) {
-  // Sign the person out everywhere, so the old password's sessions and API tokens stop working.
+  // Sign the person out everywhere, so the old password's sessions and API keys stop working.
   await db.query('delete from kanban.sessions where user_id = $1', [rows[0].id])
-  await db.query('delete from kanban.api_tokens where user_id = $1', [rows[0].id])
-  console.log(`Password changed for ${email}. Their sessions and API tokens were revoked.`)
+  await db.query('delete from kanban.api_keys where user_id = $1', [rows[0].id])
+  console.log(`Password changed for ${email}. Their sessions and API keys were revoked.`)
 } else {
   console.error(`No account for ${email}.`)
   process.exitCode = 1

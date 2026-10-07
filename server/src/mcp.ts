@@ -223,7 +223,7 @@ export const tools: Tool[] = [
 
 const INSTRUCTIONS =
   'TodoList Kanban boards. Start with list_boards, then get_board to see columns and cards. ' +
-  'Columns can be named by title. You act as the token owner: viewers can only read.'
+  'Columns can be named by title. You act as the owner of the API key: viewers can only read.'
 
 type Message = { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown }
 

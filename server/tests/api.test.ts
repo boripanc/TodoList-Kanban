@@ -309,16 +309,16 @@ describe('live updates', () => {
   })
 })
 
-/** An automation tool (n8n) calling with a personal API token. */
-async function tokenFor(person: Awaited<ReturnType<typeof signUp>>, name = 'n8n') {
-  const res = await person.call('POST', '/tokens', { name })
+/** An automation tool (n8n) calling with an API key, in an X-API-Key header unless `bearer` is set. */
+async function apiKeyFor(person: Awaited<ReturnType<typeof signUp>>, name = 'n8n', bearer = false) {
+  const res = await person.call('POST', '/api-keys', { name })
   expect(res.status).toBe(200)
-  const token = res.data.token as string
+  const key = res.data.key as string
   const call = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
     const res = await app.request(`/api${path}`, {
       method,
       headers: {
-        authorization: `Bearer ${token}`,
+        ...(bearer ? { authorization: `Bearer ${key}` } : { 'x-api-key': key }),
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
         ...headers,
       },
@@ -328,58 +328,72 @@ async function tokenFor(person: Awaited<ReturnType<typeof signUp>>, name = 'n8n'
     const data = res.status === 202 ? null : ((await res.json()) as any)
     return { status: res.status, data, headers: res.headers }
   }
-  return { token, id: res.data.id as string, call }
+  return { key, id: res.data.id as string, call }
 }
 
-describe('API tokens', () => {
-  it('creates a token shown once, signs in with it, and stops working once revoked', async () => {
+describe('API keys', () => {
+  it('creates a key shown once, signs in with it, and stops working once revoked', async () => {
     const ana = await signUp('ana@example.com')
-    const n8n = await tokenFor(ana)
-    expect(n8n.token).toMatch(/^kbn_/)
+    const n8n = await apiKeyFor(ana)
+    expect(n8n.key).toMatch(/^kbn_/)
     expect((await n8n.call('GET', '/v1/me')).data).toEqual(ana.user)
     expect((await n8n.call('GET', '/auth/me')).data.user).toEqual(ana.user)
 
-    const listed = (await ana.call('GET', '/tokens')).data
+    const listed = (await ana.call('GET', '/api-keys')).data
     expect(listed).toEqual([expect.objectContaining({ id: n8n.id, name: 'n8n', lastUsedAt: expect.any(String) })])
-    expect(JSON.stringify(listed)).not.toContain(n8n.token)
-    const { rows } = await db.query<{ token_hash: string }>('select token_hash from kanban.api_tokens')
-    expect(rows[0].token_hash).not.toContain(n8n.token)
+    expect(JSON.stringify(listed)).not.toContain(n8n.key)
+    const { rows } = await db.query<{ token_hash: string }>('select token_hash from kanban.api_keys')
+    expect(rows[0].token_hash).not.toContain(n8n.key)
 
-    expect((await ana.call('DELETE', `/tokens/${n8n.id}`)).status).toBe(200)
+    expect((await ana.call('DELETE', `/api-keys/${n8n.id}`)).status).toBe(200)
     const after = await n8n.call('GET', '/v1/boards')
     expect(after.status).toBe(401)
-    expect(after.headers.get('www-authenticate')).toBe('Bearer')
+    expect(after.data.error).toBe('Unknown or revoked API key')
   })
 
-  it('refuses unknown tokens, other people’s tokens, and tokens managing tokens', async () => {
+  it('also accepts the key as a Bearer token', async () => {
+    const ana = await signUp('ana@example.com')
+    const n8n = await apiKeyFor(ana, 'n8n', true)
+    expect((await n8n.call('GET', '/v1/me')).data).toEqual(ana.user)
+    expect((await n8n.call('DELETE', '/v1/cards/nope')).status).toBe(404)
+  })
+
+  it('refuses unknown keys, other people’s keys, and keys managing keys', async () => {
     const ana = await signUp('ana@example.com')
     const eve = await signUp('eve@example.com')
-    const n8n = await tokenFor(ana)
-    expect((await n8n.call('GET', '/tokens')).status).toBe(403)
-    expect((await n8n.call('POST', '/tokens', { name: 'more' })).status).toBe(403)
-    expect((await n8n.call('DELETE', `/tokens/${n8n.id}`)).status).toBe(403)
-    // Eve can't revoke Ana's token.
-    await eve.call('DELETE', `/tokens/${n8n.id}`)
+    const n8n = await apiKeyFor(ana)
+    expect((await n8n.call('GET', '/api-keys')).status).toBe(403)
+    expect((await n8n.call('POST', '/api-keys', { name: 'more' })).status).toBe(403)
+    expect((await n8n.call('DELETE', `/api-keys/${n8n.id}`)).status).toBe(403)
+    // Eve can't revoke Ana's key.
+    await eve.call('DELETE', `/api-keys/${n8n.id}`)
     expect((await n8n.call('GET', '/v1/me')).status).toBe(200)
-    expect((await eve.call('POST', '/tokens', { name: '' })).status).toBe(400)
+    expect((await eve.call('POST', '/api-keys', { name: '' })).status).toBe(400)
 
-    for (const header of ['Bearer kbn_nope', 'Bearer not-a-token', 'Bearer']) {
-      const res = await app.request('/api/v1/boards', { headers: { authorization: header } })
+    const badKeys: Record<string, string>[] = [
+      { 'x-api-key': 'kbn_nope' },
+      { 'x-api-key': '' },
+      { 'x-api-key': 'not-a-key' },
+      { authorization: 'Bearer kbn_nope' },
+      { authorization: 'Bearer' },
+    ]
+    for (const headers of badKeys) {
+      const res = await app.request('/api/v1/boards', { headers })
       expect(res.status).toBe(401)
     }
-    // A bad token isn't rescued by a session cookie that came along.
-    const res = await app.request('/api/v1/boards', { headers: { authorization: 'Bearer kbn_nope', cookie: 'x=y' } })
+    // A bad key isn't rescued by a session cookie that came along.
+    const res = await app.request('/api/v1/boards', { headers: { 'x-api-key': 'kbn_nope', cookie: 'x=y' } })
     expect(res.status).toBe(401)
   })
 
-  it('needs a signed-in session to manage tokens', async () => {
-    const res = await app.request('/api/tokens')
+  it('needs a signed-in session to manage keys', async () => {
+    const res = await app.request('/api/api-keys')
     expect(res.status).toBe(401)
   })
 })
 
 describe('REST API (v1)', () => {
-  it('serves its OpenAPI description without a token', async () => {
+  it('serves its OpenAPI description without a key', async () => {
     const res = await app.request('/api/v1/openapi.json')
     expect(res.status).toBe(200)
     const spec = (await res.json()) as { openapi: string; paths: Record<string, unknown> }
@@ -388,7 +402,7 @@ describe('REST API (v1)', () => {
   })
 
   it('creates a board and manages its columns', async () => {
-    const n8n = await tokenFor(await signUp('ana@example.com'))
+    const n8n = await apiKeyFor(await signUp('ana@example.com'))
     const created = await n8n.call('POST', '/v1/boards', { title: 'Inbox', labels: [{ name: 'Email' }] })
     expect(created.status).toBe(201)
     const b = created.data
@@ -426,7 +440,7 @@ describe('REST API (v1)', () => {
 
   it('creates, finds, updates, moves and deletes cards', async () => {
     const ana = await ownerWithBoard()
-    const n8n = await tokenFor(ana)
+    const n8n = await apiKeyFor(ana)
     const created = await n8n.call('POST', '/v1/boards/b1/cards', {
       column: 'to do',
       title: 'Renew passport',
@@ -492,11 +506,11 @@ describe('REST API (v1)', () => {
     expect((await n8n.call('POST', '/v1/boards/b1/cards', { column: 'To do', priority: 'mega' })).status).toBe(400)
   })
 
-  it('gives tokens their owner’s role on each board', async () => {
+  it('gives API keys their owner’s role on each board', async () => {
     const ana = await ownerWithBoard()
-    const viewer = await tokenFor(await share(ana, 'ben@example.com', 'viewer'))
-    const editor = await tokenFor(await share(ana, 'cat@example.com', 'editor'))
-    const stranger = await tokenFor(await signUp('eve@example.com'))
+    const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
+    const editor = await apiKeyFor(await share(ana, 'cat@example.com', 'editor'))
+    const stranger = await apiKeyFor(await signUp('eve@example.com'))
 
     expect((await viewer.call('GET', '/v1/boards/b1')).data.role).toBe('viewer')
     expect((await viewer.call('GET', '/v1/cards/c1')).status).toBe(200)
@@ -519,7 +533,7 @@ describe('REST API (v1)', () => {
 
   it('refuses to move a card into a column on another board', async () => {
     const ana = await ownerWithBoard()
-    const n8n = await tokenFor(ana)
+    const n8n = await apiKeyFor(ana)
     const other = (await n8n.call('POST', '/v1/boards', { title: 'Other' })).data
     const res = await n8n.call('PATCH', '/v1/cards/c1', { column: other.columns[0].id })
     expect(res.status).toBe(404)
@@ -528,7 +542,7 @@ describe('REST API (v1)', () => {
 
   it('tells the app’s live updates about changes made through the API', async () => {
     const ana = await ownerWithBoard()
-    const n8n = await tokenFor(ana)
+    const n8n = await apiKeyFor(ana)
     const stop = await events.start()
     received = []
     await n8n.call('POST', '/v1/boards/b1/cards', { column: 'To do', title: 'From n8n' })
@@ -539,13 +553,13 @@ describe('REST API (v1)', () => {
 })
 
 describe('MCP endpoint', () => {
-  const rpc = (n8n: Awaited<ReturnType<typeof tokenFor>>, method: string, params?: unknown, id: number | null = 1) =>
+  const rpc = (n8n: Awaited<ReturnType<typeof apiKeyFor>>, method: string, params?: unknown, id: number | null = 1) =>
     n8n.call('POST', '/mcp', { jsonrpc: '2.0', ...(id === null ? {} : { id }), method, params }, {
       accept: 'application/json, text/event-stream',
     })
 
-  it('initializes, lists tools and runs them as the token’s owner', async () => {
-    const n8n = await tokenFor(await ownerWithBoard())
+  it('initializes, lists tools and runs them as the key’s owner', async () => {
+    const n8n = await apiKeyFor(await ownerWithBoard())
     const init = await rpc(n8n, 'initialize', {
       protocolVersion: '2025-06-18',
       capabilities: {},
@@ -579,7 +593,7 @@ describe('MCP endpoint', () => {
 
   it('returns refusals and bad input as tool errors, and unknown methods as JSON-RPC errors', async () => {
     const ana = await ownerWithBoard()
-    const viewer = await tokenFor(await share(ana, 'ben@example.com', 'viewer'))
+    const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
     const refused = await rpc(viewer, 'tools/call', {
       name: 'create_card',
       arguments: { boardId: 'b1', column: 'To do', title: 'x' },

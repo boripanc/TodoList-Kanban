@@ -1,5 +1,5 @@
-// REST API for automation tools such as n8n: /api/v1/... with a personal API
-// token (`Authorization: Bearer kbn_...`) or a signed-in session. Described by
+// REST API for automation tools such as n8n: /api/v1/... with an API key
+// (`X-API-Key: kbn_...` or `Authorization: Bearer kbn_...`) or a signed-in session. Described by
 // /api/v1/openapi.json (server/src/openapi.ts).
 import { Hono, type Context } from 'hono'
 import type { User } from './access.ts'

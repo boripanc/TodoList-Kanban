@@ -70,14 +70,14 @@ export function openApiSpec() {
       title: 'TodoList Kanban API',
       version: '1.0.0',
       description:
-        'Manage boards, columns and cards. Authenticate with a personal API token from the app (Account menu → API tokens) ' +
-        'as `Authorization: Bearer kbn_...`. A token acts as its owner: viewers can read, editors and owners can change, ' +
+        'Manage boards, columns and cards. Authenticate with an API key from the app (Account menu → API keys) ' +
+        'in an `X-API-Key: kbn_...` header (or `Authorization: Bearer kbn_...`). A key acts as its owner: viewers can read, editors and owners can change, ' +
         'only owners can delete a board. The same operations are available to AI agents over MCP at POST /api/mcp.',
     },
     servers: [{ url: '/api/v1' }],
-    security: [{ bearerAuth: [] }],
+    security: [{ apiKey: [] }, { bearerAuth: [] }],
     paths: {
-      '/me': { get: { summary: 'Who the token belongs to', operationId: 'getMe', responses: { 200: json(ref('User')), 401: errors[401] } } },
+      '/me': { get: { summary: 'Who the API key belongs to', operationId: 'getMe', responses: { 200: json(ref('User')), 401: errors[401] } } },
       '/boards': {
         get: {
           summary: 'List boards you can see',
@@ -180,10 +180,13 @@ export function openApiSpec() {
       },
     },
     components: {
-      securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', description: 'Personal API token (kbn_...)' } },
+      securitySchemes: {
+        apiKey: { type: 'apiKey', in: 'header', name: 'X-API-Key', description: 'API key (kbn_...)' },
+        bearerAuth: { type: 'http', scheme: 'bearer', description: 'The same API key as a Bearer token' },
+      },
       responses: {
         BadRequest: json(ref('Error'), 'The request body or query is not valid'),
-        Unauthorized: json(ref('Error'), 'Missing, unknown or revoked token'),
+        Unauthorized: json(ref('Error'), 'Missing, unknown or revoked API key'),
         Forbidden: json(ref('Error'), 'Your role on the board does not allow this'),
         NotFound: json(ref('Error'), 'No such board, column or card, or you cannot see it'),
       },

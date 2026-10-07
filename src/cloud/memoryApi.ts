@@ -1,5 +1,5 @@
 import type { Role } from '../types'
-import type { ApiToken, CloudApi, CloudUser, SentInvite } from './api'
+import type { ApiKey, CloudApi, CloudUser, SentInvite } from './api'
 import { boardRow, cardRows, columnRows, docFromRows, type BoardRow, type CardRow, type ColumnRow } from './doc'
 
 interface Invite extends SentInvite {
@@ -18,7 +18,7 @@ export class MemoryServer {
   cards = new Map<string, CardRow>()
   members: { boardId: string; userId: string; role: Role }[] = []
   invites: Invite[] = []
-  apiTokens: (ApiToken & { userId: string; token: string })[] = []
+  apiKeys: (ApiKey & { userId: string; key: string })[] = []
   private listeners = new Set<{ userId: string; onBoard: (id: string) => void; onMembership: () => void }>()
   private clock = 0
   private nextId = 1
@@ -240,25 +240,27 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
       return invite.boardId
     },
 
-    async listTokens() {
+    async listApiKeys() {
       const userId = me().id
-      return server.apiTokens.filter((t) => t.userId === userId).map(({ id, name, createdAt, lastUsedAt }) => ({ id, name, createdAt, lastUsedAt }))
+      return server.apiKeys
+        .filter((k) => k.userId === userId)
+        .map(({ id, name, createdAt, lastUsedAt }) => ({ id, name, createdAt, lastUsedAt }))
     },
-    async createToken(name) {
+    async createApiKey(name) {
       if (!name.trim()) throw new Error('name is required')
       const created = {
         id: server.token(),
         name: name.trim(),
         createdAt: new Date().toISOString(),
         lastUsedAt: null,
-        token: `kbn_${server.token()}`,
+        key: `kbn_${server.token()}`,
       }
-      server.apiTokens.push({ ...created, userId: me().id })
+      server.apiKeys.push({ ...created, userId: me().id })
       return created
     },
-    async revokeToken(tokenId) {
+    async revokeApiKey(keyId) {
       const userId = me().id
-      server.apiTokens = server.apiTokens.filter((t) => !(t.id === tokenId && t.userId === userId))
+      server.apiKeys = server.apiKeys.filter((k) => !(k.id === keyId && k.userId === userId))
     },
 
     subscribe(userId, handlers) {

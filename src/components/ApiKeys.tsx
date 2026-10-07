@@ -1,23 +1,23 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import type { ApiToken } from '../cloud/api'
+import type { ApiKey } from '../cloud/api'
 import { apiBaseUrl } from '../cloud/config'
 import type { Cloud } from '../cloud/context'
 import { Modal } from './Modal'
 
 const when = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' })
 
-/** Personal API tokens, for n8n and other automation tools, and where to point them. */
-export function ApiTokensDialog({ cloud, onClose }: { cloud: Cloud; onClose: () => void }) {
+/** API keys, for n8n and other automation tools, and where to point them. */
+export function ApiKeysDialog({ cloud, onClose }: { cloud: Cloud; onClose: () => void }) {
   const { api, reportError } = cloud
-  const [tokens, setTokens] = useState<ApiToken[]>([])
+  const [keys, setKeys] = useState<ApiKey[]>([])
   const [name, setName] = useState('')
-  const [created, setCreated] = useState<{ name: string; token: string } | null>(null)
+  const [created, setCreated] = useState<{ name: string; key: string } | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
   const base = apiBaseUrl()
 
   const load = useCallback(async () => {
     try {
-      setTokens(await api.listTokens())
+      setKeys(await api.listApiKeys())
     } catch (e) {
       reportError(e)
     }
@@ -32,8 +32,8 @@ export function ApiTokensDialog({ cloud, onClose }: { cloud: Cloud; onClose: () 
     const value = name.trim()
     if (!value) return
     try {
-      const { token } = await api.createToken(value)
-      setCreated({ name: value, token })
+      const { key } = await api.createApiKey(value)
+      setCreated({ name: value, key })
       setName('')
     } catch (err) {
       reportError(err)
@@ -41,10 +41,10 @@ export function ApiTokensDialog({ cloud, onClose }: { cloud: Cloud; onClose: () 
     await load()
   }
 
-  const revoke = async (token: ApiToken) => {
-    if (!window.confirm(`Revoke “${token.name}”? Anything using it stops working.`)) return
+  const revoke = async (apiKey: ApiKey) => {
+    if (!window.confirm(`Revoke “${apiKey.name}”? Anything using it stops working.`)) return
     try {
-      await api.revokeToken(token.id)
+      await api.revokeApiKey(apiKey.id)
     } catch (e) {
       reportError(e)
     }
@@ -77,53 +77,53 @@ export function ApiTokensDialog({ cloud, onClose }: { cloud: Cloud; onClose: () 
   )
 
   return (
-    <Modal title="API tokens" onClose={onClose} wide>
-      <h2>API tokens</h2>
+    <Modal title="API keys" onClose={onClose} wide>
+      <h2>API keys</h2>
       <p className="muted">
-        Let n8n, scripts or AI agents manage your boards. A token acts as you, with your role on each board. Keep it
+        Let n8n, scripts or AI agents manage your boards. An API key acts as you, with your role on each board. Keep it
         secret, and revoke it when you stop using it.
       </p>
 
-      <section className="share-section" aria-label="New token">
-        <h3>New token</h3>
+      <section className="share-section" aria-label="New API key">
+        <h3>New API key</h3>
         <form className="share-row" onSubmit={create}>
           <input
             className="grow"
             required
             maxLength={100}
-            aria-label="Token name"
+            aria-label="Key name"
             placeholder="e.g. n8n"
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
           <button className="button primary" type="submit">
-            Create token
+            Create API key
           </button>
         </form>
         {created && (
-          <div className="token-created" role="status">
-            <p>Copy the token for “{created.name}” now. It won’t be shown again.</p>
-            <ul className="share-list">{field('Your new token', created.token)}</ul>
+          <div className="key-created" role="status">
+            <p>Copy the API key for “{created.name}” now. It won’t be shown again.</p>
+            <ul className="share-list">{field('Your new API key', created.key)}</ul>
           </div>
         )}
       </section>
 
-      <section className="share-section" aria-label="Your tokens">
-        <h3>Your tokens</h3>
-        {tokens.length === 0 ? (
-          <p className="muted small">No tokens yet.</p>
+      <section className="share-section" aria-label="Your API keys">
+        <h3>Your API keys</h3>
+        {keys.length === 0 ? (
+          <p className="muted small">No API keys yet.</p>
         ) : (
           <ul className="share-list">
-            {tokens.map((token) => (
-              <li key={token.id}>
+            {keys.map((apiKey) => (
+              <li key={apiKey.id}>
                 <div className="share-who">
-                  <strong>{token.name}</strong>
+                  <strong>{apiKey.name}</strong>
                   <small className="muted">
-                    Created {when(token.createdAt)} ·{' '}
-                    {token.lastUsedAt ? `last used ${when(token.lastUsedAt)}` : 'never used'}
+                    Created {when(apiKey.createdAt)} ·{' '}
+                    {apiKey.lastUsedAt ? `last used ${when(apiKey.lastUsedAt)}` : 'never used'}
                   </small>
                 </div>
-                <button className="button ghost" aria-label={`Revoke ${token.name}`} onClick={() => revoke(token)}>
+                <button className="button ghost" aria-label={`Revoke ${apiKey.name}`} onClick={() => revoke(apiKey)}>
                   Revoke
                 </button>
               </li>
@@ -139,11 +139,13 @@ export function ApiTokensDialog({ cloud, onClose }: { cloud: Cloud; onClose: () 
           {field('MCP server', `${base}/mcp`)}
         </ul>
         <p className="muted small">
-          Send the token as <code>Authorization: Bearer &lt;token&gt;</code>. The REST API is described at{' '}
+          Send the key in an <code>X-API-Key</code> header (or as <code>Authorization: Bearer &lt;key&gt;</code>). The
+          REST API is described at{' '}
           <a href={`${base}/v1/openapi.json`} target="_blank" rel="noreferrer">
             openapi.json
           </a>
-          . In n8n, use an HTTP Request node or the MCP Client tool with Bearer auth.
+          . In n8n, use a Header Auth credential with the name <code>X-API-Key</code>, on an HTTP Request node or the
+          MCP Client tool.
         </p>
       </section>
     </Modal>
