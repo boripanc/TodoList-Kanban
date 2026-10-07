@@ -6,11 +6,12 @@ import { templateColumns, templateLabels, type BoardTemplate } from './templates
 
 export const STORAGE_KEY = 'todolist-kanban/state'
 
+/** True for saved state from any version this app can read (see `migrateState`). */
 export function isAppState(value: unknown): value is AppState {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
   return (
-    v.version === 1 &&
+    (v.version === 1 || v.version === 2) &&
     Array.isArray(v.boardOrder) &&
     typeof v.boards === 'object' &&
     v.boards !== null &&
@@ -21,12 +22,21 @@ export function isAppState(value: unknown): value is AppState {
   )
 }
 
+/** Bring saved state up to the current version. Version 1 cards had no progress. */
+export function migrateState(state: AppState): AppState {
+  const cards: AppState['cards'] = {}
+  for (const [id, card] of Object.entries(state.cards)) {
+    cards[id] = { ...card, progress: card.progress ?? null, progressLog: card.progressLog ?? [] }
+  }
+  return { ...state, version: 2, cards }
+}
+
 export function loadState(storage: Storage | undefined = globalThis.localStorage): AppState {
   try {
     const raw = storage?.getItem(STORAGE_KEY)
     if (raw) {
       const parsed: unknown = JSON.parse(raw)
-      if (isAppState(parsed)) return parsed
+      if (isAppState(parsed)) return migrateState(parsed)
     }
   } catch {
     // Unreadable or blocked storage: fall through to sample data.
@@ -95,6 +105,7 @@ export function createSampleState(): AppState {
     priority: 'medium',
     labelIds: [label('Feature')],
     dueDate: addDays(0),
+    progress: 40,
   })
   add(review, 'Click a card to edit details', {
     description: 'Add labels, a due date, a priority, a checklist or notes.',
@@ -128,12 +139,14 @@ function cardPatch(seed: {
   dueDate?: string
   checklist?: string[]
   checkedAll?: boolean
+  progress?: number
 }) {
   return {
     description: seed.description ?? '',
     labelIds: seed.labelIds ?? [],
     priority: seed.priority ?? 'none',
     dueDate: seed.dueDate ?? null,
+    progress: seed.progress ?? null,
     checklist: (seed.checklist ?? []).map((text) => ({
       id: createId(),
       text,

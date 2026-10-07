@@ -59,6 +59,26 @@ describe('App', () => {
     expect(screen.getByText('Plan Q4 sprint')).toBeInTheDocument()
   })
 
+  it('tracks a card’s progress and logs progress updates', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    await user.click(screen.getByText('Plan next sprint'))
+    const dialog = screen.getByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Track progress' }))
+    const percent = within(dialog).getByLabelText('Progress percent (number)')
+    await user.clear(percent)
+    await user.type(percent, '60')
+    await user.type(within(dialog).getByLabelText('Progress update'), 'Backlog reviewed{Enter}')
+    const log = within(dialog).getByRole('list', { name: 'Progress updates' })
+    expect(within(log).getByText('Backlog reviewed')).toBeInTheDocument()
+    expect(within(log).getByText(/60%/)).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+
+    const card = screen.getByRole('button', { name: 'Card: Plan next sprint' })
+    expect(within(card).getByRole('progressbar', { name: 'Progress' })).toHaveAttribute('aria-valuenow', '60')
+    expect(within(card).getByText('60%')).toBeInTheDocument()
+  })
+
   it('creates a new board from a template', async () => {
     const user = userEvent.setup()
     renderApp()
@@ -76,6 +96,18 @@ describe('storage', () => {
     localStorage.setItem(STORAGE_KEY, '{not json')
     const state = loadState()
     expect(state.boardOrder.length).toBe(2)
+  })
+
+  it('upgrades boards saved before progress existed', () => {
+    const saved = createSampleState()
+    const cards = Object.fromEntries(
+      Object.entries(saved.cards).map(([id, { progress: _p, progressLog: _l, ...card }]) => [id, card]),
+    )
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 1, cards }))
+    const state = loadState()
+    expect(state.version).toBe(2)
+    expect(Object.keys(state.cards)).toEqual(Object.keys(saved.cards))
+    for (const card of Object.values(state.cards)) expect(card.progressLog).toEqual([])
   })
 })
 

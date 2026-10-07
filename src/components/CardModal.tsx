@@ -7,6 +7,7 @@ import { dueStatus, formatDue } from '../lib/dates'
 import { Modal } from './Modal'
 import { NewLabelForm } from './LabelEditor'
 import { priorityLabel } from '../lib/priority'
+import { ProgressEditor } from './ProgressEditor'
 
 const priorities: Priority[] = ['none', 'low', 'medium', 'high', 'urgent']
 
@@ -133,6 +134,8 @@ export function CardModal({
                 </button>
               </div>
             </div>
+
+            <ProgressEditor card={card} />
           </div>
 
           <aside className="card-editor-side">

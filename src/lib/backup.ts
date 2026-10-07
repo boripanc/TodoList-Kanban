@@ -1,5 +1,5 @@
 import type { AppState } from '../types'
-import { isAppState } from '../state/storage'
+import { isAppState, migrateState } from '../state/storage'
 
 export function downloadBackup(state: AppState) {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' })
@@ -14,5 +14,5 @@ export function downloadBackup(state: AppState) {
 export async function readBackup(file: File): Promise<AppState> {
   const parsed: unknown = JSON.parse(await file.text())
   if (!isAppState(parsed)) throw new Error('This file is not a kanban backup.')
-  return parsed
+  return migrateState(parsed)
 }

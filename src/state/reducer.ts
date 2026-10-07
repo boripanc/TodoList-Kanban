@@ -20,6 +20,9 @@ export type Action =
   | { type: 'card/delete'; cardId: string }
   | { type: 'card/duplicate'; cardId: string; newId: string; now: number }
   | { type: 'card/move'; cardId: string; toColumnId: string; toIndex: number }
+  /** Add a progress update; a given `progress` also becomes the card's progress. */
+  | { type: 'card/logProgress'; cardId: string; id: string; text: string; progress: number | null; now: number }
+  | { type: 'card/deleteProgress'; cardId: string; entryId: string; now: number }
   | { type: 'state/replace'; state: AppState }
   /** Put a board fetched from the cloud in place of the local copy, or add it. */
   | { type: 'board/load'; doc: BoardDoc; role: Role }
@@ -31,7 +34,7 @@ export type Action =
   | { type: 'cloud/clear' }
 
 export const initialState: AppState = {
-  version: 1,
+  version: 2,
   boardOrder: [],
   activeBoardId: null,
   boards: {},
@@ -88,13 +91,21 @@ function targetBoardId(state: AppState, action: Action): string | undefined {
     case 'card/update':
     case 'card/delete':
     case 'card/duplicate':
-    case 'card/move': {
+    case 'card/move':
+    case 'card/logProgress':
+    case 'card/deleteProgress': {
       const column = findColumnOfCard(state, action.cardId)
       return column && Object.values(state.boards).find((b) => b.columnIds.includes(column.id))?.id
     }
     default:
       return undefined
   }
+}
+
+/** A whole percentage from 0 to 100, or null when not tracked. */
+export function clampProgress(value: number | null): number | null {
+  if (value === null || !Number.isFinite(value)) return null
+  return Math.min(100, Math.max(0, Math.round(value)))
 }
 
 export function isReadOnly(board: Board | undefined): boolean {
@@ -260,6 +271,8 @@ export function reducer(state: AppState, action: Action): AppState {
         priority: 'none',
         dueDate: null,
         checklist: [],
+        progress: null,
+        progressLog: [],
         createdAt: action.now,
         updatedAt: action.now,
       }
@@ -281,6 +294,7 @@ export function reducer(state: AppState, action: Action): AppState {
         patch.title = patch.title.trim()
         if (!patch.title) delete patch.title
       }
+      if (patch.progress !== undefined) patch.progress = clampProgress(patch.progress)
       return {
         ...state,
         cards: { ...state.cards, [card.id]: { ...card, ...patch, updatedAt: action.now } },
@@ -308,6 +322,9 @@ export function reducer(state: AppState, action: Action): AppState {
         title: `${card.title} (copy)`,
         labelIds: [...card.labelIds],
         checklist: card.checklist.map((item, i) => ({ ...item, id: `${action.newId}-${i}` })),
+        // The copy is a new task: it starts without progress history.
+        progress: null,
+        progressLog: [],
         createdAt: action.now,
         updatedAt: action.now,
       }
@@ -320,6 +337,32 @@ export function reducer(state: AppState, action: Action): AppState {
           [column.id]: { ...column, cardIds: insertAt(column.cardIds, index, copy.id) },
         },
       }
+    }
+
+    case 'card/logProgress': {
+      const card = state.cards[action.cardId]
+      const text = action.text.trim()
+      const progress = clampProgress(action.progress)
+      if (!card || (!text && progress === null)) return state
+      const entry = { id: action.id, text, progress, at: action.now }
+      const next: Card = {
+        ...card,
+        progress: progress ?? card.progress,
+        progressLog: [...card.progressLog, entry],
+        updatedAt: action.now,
+      }
+      return { ...state, cards: { ...state.cards, [card.id]: next } }
+    }
+
+    case 'card/deleteProgress': {
+      const card = state.cards[action.cardId]
+      if (!card || !card.progressLog.some((e) => e.id === action.entryId)) return state
+      const next: Card = {
+        ...card,
+        progressLog: card.progressLog.filter((e) => e.id !== action.entryId),
+        updatedAt: action.now,
+      }
+      return { ...state, cards: { ...state.cards, [card.id]: next } }
     }
 
     case 'card/move': {

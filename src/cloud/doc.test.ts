@@ -30,6 +30,19 @@ describe('board documents', () => {
     expect(back).toEqual(doc)
   })
 
+  it('carries progress through rows, and reads rows without it as untracked', () => {
+    let { state, board } = setup()
+    state = reducer(state, { type: 'card/logProgress', cardId: '1', id: 'p1', text: 'Started', progress: 20, now })
+    const doc = extractBoardDoc(state, board.id)!
+    const rows = cardRows(doc)
+    expect(rows.find((r) => r.id === '1')).toMatchObject({ progress: 20, progress_log: [{ id: 'p1' }] })
+    expect(docFromRows(boardRow(doc), columnRows(doc), rows)).toEqual(doc)
+
+    const old = rows.map(({ progress: _p, progress_log: _l, ...row }) => row)
+    const back = docFromRows(boardRow(doc), columnRows(doc), old)
+    expect(back.cards.every((c) => c.progress === null && c.progressLog.length === 0)).toBe(true)
+  })
+
   it('finds nothing to write when nothing changed', () => {
     const { state, board } = setup()
     const doc = extractBoardDoc(state, board.id)!

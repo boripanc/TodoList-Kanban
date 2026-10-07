@@ -202,6 +202,28 @@ describe('boards', () => {
     expect(rows).toEqual([{ title: 'To do', board_id: 'b1' }])
   })
 
+  it('syncs card progress, and keeps it when an older app leaves it out', async () => {
+    const ana = await ownerWithBoard()
+    const entry = { id: 'p1', text: 'Shortlisted two airlines', progress: 40, at: 5 }
+    await ana.call('POST', '/boards/b1/changes', {
+      upsertCards: [{ ...card('c1', 'Book flights', 'col1', 0), progress: 40, progress_log: [entry] }],
+    })
+    const stored = () => ana.call('GET', '/boards/b1').then((r) => r.data.cards[0])
+    expect(await stored()).toMatchObject({ progress: 40, progress_log: [entry] })
+
+    await ana.call('POST', '/boards/b1/changes', { upsertCards: [card('c1', 'Book cheap flights', 'col1', 0)] })
+    expect(await stored()).toMatchObject({ title: 'Book cheap flights', progress: 40, progress_log: [entry] })
+
+    await ana.call('POST', '/boards/b1/changes', {
+      upsertCards: [{ ...card('c1', 'Book cheap flights', 'col1', 0), progress: null, progress_log: [] }],
+    })
+    expect(await stored()).toMatchObject({ progress: null, progress_log: [] })
+
+    const bad = await ana.call('POST', '/boards/b1/changes', { upsertCards: [{ ...card('c1', 'x'), progress: 120 }] })
+    expect(bad.status).toBe(400)
+    expect(bad.data.error).toMatch(/progress/)
+  })
+
   it('rejects malformed changes', async () => {
     const ana = await ownerWithBoard()
     const bad = await ana.call('POST', '/boards/b1/changes', {
@@ -507,6 +529,36 @@ describe('REST API (v1)', () => {
     expect((await n8n.call('POST', '/v1/boards/b1/cards', { column: 'To do', priority: 'mega' })).status).toBe(400)
   })
 
+  it('sets card progress and logs progress updates', async () => {
+    const ana = await ownerWithBoard()
+    const n8n = await apiKeyFor(ana)
+    expect((await n8n.call('GET', '/v1/cards/c1')).data).toMatchObject({ progress: null, progressLog: [] })
+    expect((await n8n.call('PATCH', '/v1/cards/c1', { progress: 25 })).data.progress).toBe(25)
+
+    const logged = await n8n.call('POST', '/v1/cards/c1/progress', { text: 'Picked the dates', progress: 60 })
+    expect(logged.status).toBe(201)
+    expect(logged.data).toMatchObject({
+      progress: 60,
+      progressLog: [{ id: expect.any(String), text: 'Picked the dates', progress: 60, at: expect.any(String) }],
+    })
+    // A note on its own keeps the progress; a later note goes after the earlier one.
+    const note = await n8n.call('POST', '/v1/cards/c1/progress', { text: 'Waiting on visa' })
+    expect(note.data.progress).toBe(60)
+    expect(note.data.progressLog.map((e: { text: string }) => e.text)).toEqual(['Picked the dates', 'Waiting on visa'])
+    expect((await n8n.call('GET', '/v1/cards?search=visa')).data).toHaveLength(1)
+
+    expect((await n8n.call('POST', '/v1/cards/c1/progress', {})).status).toBe(400)
+    expect((await n8n.call('POST', '/v1/cards/c1/progress', { progress: 101 })).status).toBe(400)
+    expect((await n8n.call('PATCH', '/v1/cards/c1', { progress: -1 })).status).toBe(400)
+    expect((await n8n.call('PATCH', '/v1/cards/c1', { progress: null })).data.progress).toBeNull()
+
+    const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
+    expect((await viewer.call('POST', '/v1/cards/c1/progress', { text: 'x' })).status).toBe(403)
+    expect((await viewer.call('PATCH', '/v1/cards/c1', { progress: 90 })).status).toBe(403)
+    const stranger = await apiKeyFor(await signUp('eve@example.com'))
+    expect((await stranger.call('POST', '/v1/cards/c1/progress', { text: 'x' })).status).toBe(404)
+  })
+
   it('gives API keys their owner’s role on each board', async () => {
     const ana = await ownerWithBoard()
     const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
@@ -590,6 +642,17 @@ describe('MCP endpoint', () => {
     expect(JSON.parse(moved.data.result.content[0].text)).toMatchObject({ column: 'Done' })
     const found = await rpc(n8n, 'tools/call', { name: 'find_cards', arguments: { search: 'hotel' } })
     expect(JSON.parse(found.data.result.content[0].text)).toHaveLength(1)
+
+    const progressed = await rpc(n8n, 'tools/call', {
+      name: 'add_progress_note',
+      arguments: { cardId: card.id, text: 'Left a voicemail', progress: 50 },
+    })
+    expect(JSON.parse(progressed.data.result.content[0].text)).toMatchObject({
+      progress: 50,
+      progressLog: [{ text: 'Left a voicemail', progress: 50 }],
+    })
+    const updated = await rpc(n8n, 'tools/call', { name: 'update_card', arguments: { cardId: card.id, progress: 100 } })
+    expect(JSON.parse(updated.data.result.content[0].text)).toMatchObject({ progress: 100 })
   })
 
   it('returns refusals and bad input as tool errors, and unknown methods as JSON-RPC errors', async () => {

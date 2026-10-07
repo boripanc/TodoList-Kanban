@@ -106,6 +106,62 @@ describe('cards', () => {
   })
 })
 
+describe('progress', () => {
+  function withCard() {
+    const { state, board } = workBoard()
+    return run(state, { type: 'card/add', columnId: board.columnIds[0], id: 'c1', title: 'Task', now })
+  }
+
+  it('starts untracked and keeps progress between 0 and 100', () => {
+    let state = withCard()
+    expect(state.cards.c1).toMatchObject({ progress: null, progressLog: [] })
+    state = run(state, { type: 'card/update', cardId: 'c1', patch: { progress: 42.6 }, now })
+    expect(state.cards.c1.progress).toBe(43)
+    state = run(state, { type: 'card/update', cardId: 'c1', patch: { progress: 150 }, now })
+    expect(state.cards.c1.progress).toBe(100)
+    state = run(state, { type: 'card/update', cardId: 'c1', patch: { progress: -5 }, now })
+    expect(state.cards.c1.progress).toBe(0)
+    state = run(state, { type: 'card/update', cardId: 'c1', patch: { progress: null }, now })
+    expect(state.cards.c1.progress).toBeNull()
+  })
+
+  it('logs progress updates, setting the progress when one is given', () => {
+    let state = withCard()
+    state = run(
+      state,
+      { type: 'card/logProgress', cardId: 'c1', id: 'p1', text: '  Drafted outline ', progress: 30, now: now + 1 },
+      { type: 'card/logProgress', cardId: 'c1', id: 'p2', text: 'Waiting on review', progress: null, now: now + 2 },
+    )
+    expect(state.cards.c1.progress).toBe(30)
+    expect(state.cards.c1.progressLog).toEqual([
+      { id: 'p1', text: 'Drafted outline', progress: 30, at: now + 1 },
+      { id: 'p2', text: 'Waiting on review', progress: null, at: now + 2 },
+    ])
+    expect(state.cards.c1.updatedAt).toBe(now + 2)
+
+    // Nothing to log: no text and no progress.
+    expect(reducer(state, { type: 'card/logProgress', cardId: 'c1', id: 'p3', text: ' ', progress: null, now })).toBe(
+      state,
+    )
+
+    state = run(state, { type: 'card/deleteProgress', cardId: 'c1', entryId: 'p1', now })
+    expect(state.cards.c1.progressLog.map((e) => e.id)).toEqual(['p2'])
+    expect(state.cards.c1.progress).toBe(30)
+    expect(reducer(state, { type: 'card/deleteProgress', cardId: 'c1', entryId: 'nope', now })).toBe(state)
+  })
+
+  it('starts a duplicate without progress', () => {
+    let state = withCard()
+    state = run(
+      state,
+      { type: 'card/logProgress', cardId: 'c1', id: 'p1', text: 'Half way', progress: 50, now },
+      { type: 'card/duplicate', cardId: 'c1', newId: 'copy', now },
+    )
+    expect(state.cards.copy).toMatchObject({ progress: null, progressLog: [] })
+    expect(state.cards.c1.progress).toBe(50)
+  })
+})
+
 describe('columns', () => {
   it('adds, reorders, limits and deletes columns', () => {
     let { state, board } = workBoard()
@@ -193,6 +249,8 @@ describe('shared boards', () => {
       { type: 'card/update', cardId: 'c1', patch: { title: 'Edited' }, now },
       { type: 'card/move', cardId: 'c1', toColumnId: board.columnIds[1], toIndex: 0 },
       { type: 'card/delete', cardId: 'c1' },
+      { type: 'card/logProgress', cardId: 'c1', id: 'p1', text: 'Done', progress: 100 },
+      { type: 'card/deleteProgress', cardId: 'c1', entryId: 'p1' },
       { type: 'label/delete', boardId: board.id, labelId: board.labels[0].id },
     ].map((a) => ({ now, ...a }) as Action)
     for (const action of attempts) expect(reducer(state, action)).toBe(state)
