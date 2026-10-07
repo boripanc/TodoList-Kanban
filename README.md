@@ -93,7 +93,7 @@ Columns can be named by title (any case), labels by name; a label name the board
 Claude connects to the MCP server with OAuth, so there is no key to paste: you sign in with your app account and allow it.
 
 1. In Claude, open **Settings → Connectors → Add custom connector**.
-2. Enter a name and the URL `https://your-domain/api/mcp`. Leave the OAuth Client ID and secret empty.
+2. Enter a name and the URL `https://your-domain/api/mcp`. Leave the OAuth Client ID and secret empty. The site address on its own (`https://your-domain`) and `/api/mcp/` with a trailing slash work too.
 3. Click **Connect**. A TodoList Kanban page opens: sign in (if you aren't already) and click **Allow**.
 
 Claude then acts as you, with your role on each board. The app lists it under **Connected apps** in the **API keys…** dialog, where **Disconnect** stops its access at once. Resetting someone's password also disconnects their apps.

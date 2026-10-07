@@ -197,7 +197,7 @@ export function createApp({ db, events, secureCookies = false, publicUrl }: AppO
     const user = await currentUser(c)
     if (!user) {
       // Tells MCP clients such as Claude where to sign in.
-      if (c.req.path === '/api/mcp') {
+      if (c.req.path === '/api/mcp' || c.req.path === '/api/mcp/') {
         const metadata = oauth.protectedResourceMetadataUrl(oauth.publicOrigin(c, publicUrl))
         c.header(
           'WWW-Authenticate',
@@ -269,11 +269,14 @@ export function createApp({ db, events, secureCookies = false, publicUrl }: AppO
   // --- REST API and MCP for automation (n8n, AI agents) ---
 
   app.route('/v1', restApi(db))
-  app.post('/mcp', (c) => handleMcp(c, db, c.get('user')))
-  app.on(['GET', 'DELETE'], '/mcp', (c) => {
-    c.header('Allow', 'POST')
-    return c.json({ error: 'This MCP server answers POST requests only (no event stream).' }, 405)
-  })
+  // With or without a trailing slash, as people paste it either way.
+  for (const path of ['/mcp', '/mcp/']) {
+    app.post(path, (c) => handleMcp(c, db, c.get('user')))
+    app.on(['GET', 'DELETE'], path, (c) => {
+      c.header('Allow', 'POST')
+      return c.json({ error: 'This MCP server answers POST requests only (no event stream).' }, 405)
+    })
+  }
 
   // --- Boards ---
 
@@ -579,6 +582,36 @@ export function createApp({ db, events, secureCookies = false, publicUrl }: AppO
   // The site root adds the OAuth discovery documents that MCP clients look for.
   const root = new Hono()
   root.route('/', oauth.wellKnownRoutes({ publicUrl }))
+
+  // Log MCP traffic in one line per request, so a client that sees no tools can be traced in the server logs.
+  root.use(async (c, next) => {
+    await next()
+    if (['/', '/api/mcp', '/api/mcp/'].includes(c.req.path) && c.req.method !== 'GET' && c.req.method !== 'HEAD') {
+      console.log(`MCP ${c.req.method} ${c.req.path} -> ${c.res.status}`)
+    }
+  })
+
+  // The MCP server also answers at the site address itself, for people who connect Claude to
+  // https://your-domain rather than https://your-domain/api/mcp. GET / stays the app's page.
+  root.post('/', async (c) => {
+    const res = await app.fetch(new Request(new URL('/api/mcp', c.req.url), c.req.raw))
+    if (res.status !== 401) return res
+    const headers = new Headers(res.headers)
+    const metadata = oauth.rootResourceMetadataUrl(oauth.publicOrigin(c, publicUrl))
+    const invalid = c.req.header('authorization') || c.req.header('x-api-key') ? ', error="invalid_token"' : ''
+    headers.set('WWW-Authenticate', `Bearer resource_metadata="${metadata}"${invalid}`)
+    return new Response(res.body, { status: 401, headers })
+  })
+  root.on(['GET', 'DELETE'], '/', async (c, next) => {
+    // An MCP client asking for an event stream, not a browser asking for the page.
+    const accept = c.req.header('accept') ?? ''
+    if (c.req.method === 'DELETE' || (accept.includes('text/event-stream') && !accept.includes('text/html'))) {
+      c.header('Allow', 'POST')
+      return c.json({ error: 'This MCP server answers POST requests only (no event stream).' }, 405)
+    }
+    await next()
+  })
+
   root.route('/', app)
   return root
 }
