@@ -98,34 +98,48 @@ export function createApp({ db, events, secureCookies = false, publicUrl }: AppO
     })
   }
 
-  /** The API key in an `X-API-Key` header or an `Authorization: Bearer ...` header, if the request has one. */
-  function apiKeyOf(c: Context): string | undefined {
+  /**
+   * The credentials a request carries: an `X-API-Key` header and an `Authorization: Bearer ...` header,
+   * in that order. Both can come at once, e.g. Claude sends its OAuth token as Bearer while a header
+   * someone added to the connector carries an API key.
+   */
+  function credentialsOf(c: Context): string[] {
+    const credentials: string[] = []
     const header = c.req.header('x-api-key')
-    if (header !== undefined) return header.trim()
+    if (header !== undefined) credentials.push(header.trim())
     const authorization = c.req.header('authorization')
-    if (authorization === undefined) return undefined
-    return authorization.match(/^Bearer\s+(\S+)\s*$/i)?.[1] ?? ''
+    if (authorization !== undefined) credentials.push(authorization.match(/^Bearer\s+(\S+)\s*$/i)?.[1] ?? '')
+    return credentials
+  }
+
+  /** The first API key or OAuth token the request carries, if any. */
+  const apiKeyOf = (c: Context): string | undefined => credentialsOf(c)[0]
+
+  async function userForCredential(apiKey: string): Promise<User | null> {
+    if (apiKey.startsWith(oauth.ACCESS_TOKEN_PREFIX)) return oauth.userForAccessToken(db, apiKey)
+    if (!apiKey.startsWith(API_KEY_PREFIX)) return null
+    const { rows } = await db.query<User & { key_id: string; last_used_at: Date | null }>(
+      `select u.id, u.email, k.id as key_id, k.last_used_at from kanban.api_keys k
+       join kanban.users u on u.id = k.user_id where k.token_hash = $1`,
+      [hashToken(apiKey)],
+    )
+    const row = rows[0]
+    if (!row) return null
+    if (!row.last_used_at || Date.now() - new Date(row.last_used_at).getTime() > 60_000) {
+      await db.query('update kanban.api_keys set last_used_at = now() where id = $1', [row.key_id])
+    }
+    return { id: row.id, email: row.email }
   }
 
   async function currentUser(c: Context): Promise<User | null> {
-    const apiKey = apiKeyOf(c)
-    if (apiKey !== undefined) {
-      // With an API key or OAuth token, only that counts, not a session cookie that came along.
-      if (apiKey.startsWith(oauth.ACCESS_TOKEN_PREFIX)) return oauth.userForAccessToken(db, apiKey)
-      if (!apiKey.startsWith(API_KEY_PREFIX)) return null
-      const { rows } = await db.query<User & { key_id: string; last_used_at: Date | null }>(
-        `select u.id, u.email, k.id as key_id, k.last_used_at from kanban.api_keys k
-         join kanban.users u on u.id = k.user_id where k.token_hash = $1`,
-        [hashToken(apiKey)],
-      )
-      const row = rows[0]
-      if (!row) return null
-      if (!row.last_used_at || Date.now() - new Date(row.last_used_at).getTime() > 60_000) {
-        await db.query('update kanban.api_keys set last_used_at = now() where id = $1', [row.key_id])
-      }
-      return { id: row.id, email: row.email }
+    const credentials = credentialsOf(c)
+    // With an API key or OAuth token, only those count, not a session cookie that came along.
+    // The first one that works decides who the caller is.
+    for (const credential of credentials) {
+      const user = await userForCredential(credential)
+      if (user) return user
     }
-    return sessionUser(c)
+    return credentials.length ? null : sessionUser(c)
   }
 
   async function sessionUser(c: Context): Promise<User | null> {
@@ -205,8 +219,8 @@ export function createApp({ db, events, secureCookies = false, publicUrl }: AppO
         )
       }
       if (apiKeyOf(c) !== undefined && c.req.path.startsWith('/api/mcp')) {
-        const kind = apiKeyOf(c)!.startsWith(oauth.ACCESS_TOKEN_PREFIX) ? 'OAuth access token' : 'API key'
-        console.log(`MCP refused: unknown, expired or disconnected ${kind}`)
+        const kinds = credentialsOf(c).map((k) => (k.startsWith(oauth.ACCESS_TOKEN_PREFIX) ? 'OAuth access token' : 'API key'))
+        console.log(`MCP refused: unknown, expired or disconnected ${kinds.join(' and ')}`)
       }
       if (apiKeyOf(c)?.startsWith(oauth.ACCESS_TOKEN_PREFIX)) fail(401, 'The access token is invalid or expired')
       if (apiKeyOf(c) !== undefined) fail(401, 'Unknown or revoked API key')
@@ -593,9 +607,10 @@ export function createApp({ db, events, secureCookies = false, publicUrl }: AppO
     const path = c.req.path
     if (['/', '/api/mcp', '/api/mcp/'].includes(path) && c.req.method !== 'GET' && c.req.method !== 'HEAD') {
       // Which kind of credential came along (never the credential itself), to trace connection problems.
-      const credential = (c.req.header('x-api-key') ?? c.req.header('authorization') ?? '').replace(/^Bearer\s+/i, '')
-      const kind = !credential ? 'none' : (['kbo_', 'kbn_'].find((prefix) => credential.startsWith(prefix)) ?? 'other')
-      console.log(`MCP ${c.req.method} ${path} -> ${c.res.status} (credential: ${kind})`)
+      const kind = (credential: string) => ['kbo_', 'kbn_'].find((prefix) => credential.startsWith(prefix)) ?? 'other'
+      const presented = [c.req.header('x-api-key'), c.req.header('authorization')?.replace(/^Bearer\s+/i, '')]
+      const kinds = presented.filter((x) => x !== undefined).map((x) => kind(x!.trim()))
+      console.log(`MCP ${c.req.method} ${path} -> ${c.res.status} (credential: ${kinds.join(' + ') || 'none'})`)
     } else if (path.startsWith('/.well-known/') || (path.startsWith('/api/oauth/') && c.req.method === 'GET')) {
       // Discovery and the sign-in page: shows how far a connecting client got.
       console.log(`OAuth ${c.req.method} ${path} -> ${c.res.status}`)
