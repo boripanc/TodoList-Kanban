@@ -5,7 +5,7 @@ import { HTTPException } from 'hono/http-exception'
 import { streamSSE } from 'hono/streaming'
 import type { CardRow, ColumnRow } from '../../src/cloud/doc.ts'
 import { fail, requireRole, type Role, type User } from './access.ts'
-import { API_TOKEN_PREFIX, hashPassword, hashToken, MIN_PASSWORD_LENGTH, newToken, verifyPassword } from './auth.ts'
+import { API_KEY_PREFIX, hashPassword, hashToken, MIN_PASSWORD_LENGTH, newToken, verifyPassword } from './auth.ts'
 import type { Db, Queryable } from './db.ts'
 import type { EventHub } from './events.ts'
 import { handleMcp } from './mcp.ts'
@@ -13,7 +13,7 @@ import { openApiSpec } from './openapi.ts'
 import { restApi } from './rest.ts'
 import * as v from './validate.ts'
 
-type Env = { Variables: { user: User; viaToken: boolean } }
+type Env = { Variables: { user: User; viaApiKey: boolean } }
 
 export const SESSION_COOKIE = 'kanban_session'
 const SESSION_DAYS = 30
@@ -62,10 +62,10 @@ export function createApp({ db, events, secureCookies = false }: AppOptions) {
   // Changes must be JSON: browsers can't send that cross-site without a CORS
   // preflight, which this server never allows. Together with SameSite cookies
   // this stops other sites from acting as a signed-in user. Requests with an
-  // API token are exempt: browsers can't add that header cross-site either,
+  // API key are exempt: browsers can't add that header cross-site either,
   // and automation tools often send a DELETE with no body.
   app.use(async (c, next) => {
-    if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && !bearer(c)) {
+    if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && apiKeyOf(c) === undefined) {
       if (!c.req.header('content-type')?.startsWith('application/json')) fail(400, 'Expected JSON')
     }
     await next()
@@ -94,26 +94,29 @@ export function createApp({ db, events, secureCookies = false }: AppOptions) {
     })
   }
 
-  /** The API token in an `Authorization: Bearer ...` header, if the request has one. */
-  function bearer(c: Context): string | undefined {
-    const header = c.req.header('authorization')
-    return header?.match(/^Bearer\s+(\S+)\s*$/i)?.[1]
+  /** The API key in an `X-API-Key` header or an `Authorization: Bearer ...` header, if the request has one. */
+  function apiKeyOf(c: Context): string | undefined {
+    const header = c.req.header('x-api-key')
+    if (header !== undefined) return header.trim()
+    const authorization = c.req.header('authorization')
+    if (authorization === undefined) return undefined
+    return authorization.match(/^Bearer\s+(\S+)\s*$/i)?.[1] ?? ''
   }
 
   async function currentUser(c: Context): Promise<User | null> {
-    const apiToken = bearer(c)
-    if (apiToken !== undefined) {
-      // With a token, only the token counts, not a session cookie that came along.
-      if (!apiToken.startsWith(API_TOKEN_PREFIX)) return null
-      const { rows } = await db.query<User & { token_id: string; last_used_at: Date | null }>(
-        `select u.id, u.email, t.id as token_id, t.last_used_at from kanban.api_tokens t
-         join kanban.users u on u.id = t.user_id where t.token_hash = $1`,
-        [hashToken(apiToken)],
+    const apiKey = apiKeyOf(c)
+    if (apiKey !== undefined) {
+      // With an API key, only the key counts, not a session cookie that came along.
+      if (!apiKey.startsWith(API_KEY_PREFIX)) return null
+      const { rows } = await db.query<User & { key_id: string; last_used_at: Date | null }>(
+        `select u.id, u.email, k.id as key_id, k.last_used_at from kanban.api_keys k
+         join kanban.users u on u.id = k.user_id where k.token_hash = $1`,
+        [hashToken(apiKey)],
       )
       const row = rows[0]
       if (!row) return null
       if (!row.last_used_at || Date.now() - new Date(row.last_used_at).getTime() > 60_000) {
-        await db.query('update kanban.api_tokens set last_used_at = now() where id = $1', [row.token_id])
+        await db.query('update kanban.api_keys set last_used_at = now() where id = $1', [row.key_id])
       }
       return { id: row.id, email: row.email }
     }
@@ -175,31 +178,28 @@ export function createApp({ db, events, secureCookies = false }: AppOptions) {
 
   app.get('/v1/openapi.json', (c) => c.json(openApiSpec()))
 
-  // Everything below needs a signed-in user, or an API token.
+  // Everything below needs a signed-in user, or an API key.
   app.use(async (c, next) => {
     const user = await currentUser(c)
     if (!user) {
-      if (bearer(c) !== undefined) {
-        c.header('WWW-Authenticate', 'Bearer')
-        fail(401, 'Unknown or revoked API token')
-      }
+      if (apiKeyOf(c) !== undefined) fail(401, 'Unknown or revoked API key')
       fail(401, 'Sign in first')
     }
     c.set('user', user!)
-    c.set('viaToken', bearer(c) !== undefined)
+    c.set('viaApiKey', apiKeyOf(c) !== undefined)
     await next()
   })
 
-  // --- API tokens (managed in the app, with a signed-in session) ---
+  // --- API keys (managed in the app, with a signed-in session) ---
 
   const sessionOnly = (c: Context<Env>) => {
-    if (c.get('viaToken')) fail(403, 'API tokens cannot manage API tokens. Use the app.')
+    if (c.get('viaApiKey')) fail(403, 'API keys cannot manage API keys. Use the app.')
   }
 
-  app.get('/tokens', async (c) => {
+  app.get('/api-keys', async (c) => {
     sessionOnly(c)
     const { rows } = await db.query<{ id: string; name: string; created_at: Date; last_used_at: Date | null }>(
-      'select id, name, created_at, last_used_at from kanban.api_tokens where user_id = $1 order by created_at',
+      'select id, name, created_at, last_used_at from kanban.api_keys where user_id = $1 order by created_at',
       [c.get('user').id],
     )
     return c.json(
@@ -212,20 +212,20 @@ export function createApp({ db, events, secureCookies = false }: AppOptions) {
     )
   })
 
-  app.post('/tokens', async (c) => {
+  app.post('/api-keys', async (c) => {
     sessionOnly(c)
-    const name = v.tokenName((await body(c)).name)
-    const token = API_TOKEN_PREFIX + newToken()
+    const name = v.apiKeyName((await body(c)).name)
+    const key = API_KEY_PREFIX + newToken()
     const { rows } = await db.query<{ id: string; created_at: Date }>(
-      'insert into kanban.api_tokens (user_id, name, token_hash) values ($1, $2, $3) returning id, created_at',
-      [c.get('user').id, name, hashToken(token)],
+      'insert into kanban.api_keys (user_id, name, token_hash) values ($1, $2, $3) returning id, created_at',
+      [c.get('user').id, name, hashToken(key)],
     )
-    return c.json({ id: rows[0].id, name, createdAt: new Date(rows[0].created_at).toISOString(), lastUsedAt: null, token })
+    return c.json({ id: rows[0].id, name, createdAt: new Date(rows[0].created_at).toISOString(), lastUsedAt: null, key })
   })
 
-  app.delete('/tokens/:id', async (c) => {
+  app.delete('/api-keys/:id', async (c) => {
     sessionOnly(c)
-    await db.query('delete from kanban.api_tokens where id = $1 and user_id = $2', [
+    await db.query('delete from kanban.api_keys where id = $1 and user_id = $2', [
       v.uuid(c.req.param('id')),
       c.get('user').id,
     ])

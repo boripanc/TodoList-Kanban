@@ -264,7 +264,7 @@ export function cardQuery(value: unknown): CardQuery {
   }
 }
 
-export function tokenName(value: unknown): string {
+export function apiKeyName(value: unknown): string {
   return title(value, 'name', 100)
 }
 

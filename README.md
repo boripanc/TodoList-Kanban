@@ -13,7 +13,7 @@ A kanban board for work and daily life. It works in the browser with no account,
 - **Backup**: export all boards to JSON and import them again.
 - **Light and dark themes**, following the system by default.
 - **Accounts and sharing** (optional, with your own Postgres): sign in with an email and password, keep boards in your account on every device, invite people by email or with a link as editors or viewers, accept or decline invitations, change roles, remove people or leave a board. Shared boards update live.
-- **Automation** (with accounts): personal API tokens, a REST API and an MCP server, so n8n, scripts and AI agents can manage boards.
+- **Automation** (with accounts): API keys, a REST API and an MCP server, so n8n, scripts and AI agents can manage boards.
 - **Keyboard shortcuts**: `/` search, `N` new card, `F` filters, `Enter` open card, `Space` pick up and drop, `?` list them all.
 
 ## Getting started
@@ -66,9 +66,9 @@ Behind a reverse proxy, forward `/api` to the server and keep the app on the sam
 
 ## Automation: REST API, MCP and n8n
 
-With accounts on, other tools can manage boards for you. Each person creates their own **API tokens** in the app (account menu → **API tokens…**). A token acts as that person, with their role on each board: viewers can only read, editors and owners can change, and only owners can delete a board. The token is shown once; the server keeps only a hash of it. Revoke it from the same dialog. Resetting someone's password with `server:set-password` also revokes their tokens.
+With accounts on, other tools can manage boards for you. Each person creates their own **API keys** in the app (account menu → **API keys…**). A key acts as that person, with their role on each board: viewers can only read, editors and owners can change, and only owners can delete a board. The key is shown once; the server keeps only a hash of it. Revoke it from the same dialog. Resetting someone's password with `server:set-password` also revokes their API keys.
 
-Send the token as `Authorization: Bearer kbn_...` to either of these:
+Send the key in an `X-API-Key: kbn_...` header (`Authorization: Bearer kbn_...` works too) to either of these:
 
 - **REST API** at `/api/v1`, described by `/api/v1/openapi.json` (OpenAPI 3).
 - **MCP server** at `/api/mcp` (Streamable HTTP), for AI agents. Tools: `list_boards`, `get_board`, `create_board`, `rename_board`, `add_column`, `update_column`, `delete_column`, `find_cards`, `get_card`, `create_card`, `update_card`, `move_card`, `delete_card`. Deleting a whole board is left to the REST API and the app.
@@ -89,10 +89,10 @@ Columns can be named by title (any case), labels by name; a label name the board
 
 ### n8n setup
 
-1. In the app, open the account menu → **API tokens…**, create a token named `n8n` and copy it.
-2. In n8n, create a credential of type **Bearer Auth** with the token. (On older n8n, use **Header Auth** with name `Authorization` and value `Bearer kbn_...`.)
-3. **Workflows (HTTP Request node)**: set Authentication to *Generic Credential Type* → *Bearer Auth* and pick the credential. For example, to add a card for each new email: Method `POST`, URL `https://your-domain/api/v1/boards/<boardId>/cards`, Send Body → JSON `{"column": "To do", "title": "{{ $json.subject }}"}`. Get board ids from `GET https://your-domain/api/v1/boards`.
-4. **AI agents (MCP Client Tool)**: add an *AI Agent* node and attach an *MCP Client Tool* with Endpoint `https://your-domain/api/mcp`, Server Transport *HTTP Streamable*, Authentication *Bearer Auth* with the same credential, and Tools to Include *All*. The agent can then list boards, add, update, move and find cards.
+1. In the app, open the account menu → **API keys…**, create a key named `n8n` and copy it.
+2. In n8n, create a **Header Auth** credential with Name `X-API-Key` and Value set to the key.
+3. **Workflows (HTTP Request node)**: set Authentication to *Generic Credential Type* → *Header Auth* and pick the credential. For example, to add a card for each new email: Method `POST`, URL `https://your-domain/api/v1/boards/<boardId>/cards`, Send Body → JSON `{"column": "To do", "title": "{{ $json.subject }}"}`. Get board ids from `GET https://your-domain/api/v1/boards`.
+4. **AI agents (MCP Client Tool)**: add an *AI Agent* node and attach an *MCP Client Tool* with Endpoint `https://your-domain/api/mcp`, Server Transport *HTTP Streamable*, Authentication *Header Auth* with the same credential, and Tools to Include *All*. The agent can then list boards, add, update, move and find cards.
 
 For the deployed app, `your-domain` is `workstream.teddybiere.info`.
 
@@ -124,7 +124,7 @@ src/
   components/         Board, Column, CardItem, CardModal, FilterBar, Sharing, ...
 server/
   src/                API server: accounts, boards, members, invites, live updates,
-                      API tokens, REST API (rest.ts, openapi.ts) and MCP server (mcp.ts)
+                      API keys, REST API (rest.ts, openapi.ts) and MCP server (mcp.ts)
   migrations/         Database schema, applied on start
   tests/              API tests, run against a real Postgres engine (PGlite)
 ```

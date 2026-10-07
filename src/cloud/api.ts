@@ -29,8 +29,8 @@ export interface ReceivedInvite {
   invitedBy: string
 }
 
-/** A personal API token, for automation tools such as n8n. The token itself is only shown once, on creation. */
-export interface ApiToken {
+/** An API key, for automation tools such as n8n. The key itself is only shown once, on creation. */
+export interface ApiKey {
   id: string
   name: string
   createdAt: string
@@ -71,10 +71,10 @@ export interface CloudApi {
   /** Returns the board id. */
   joinWithLink(token: string): Promise<string>
 
-  listTokens(): Promise<ApiToken[]>
-  /** Returns the new token's details and the secret token, which can't be read again later. */
-  createToken(name: string): Promise<ApiToken & { token: string }>
-  revokeToken(tokenId: string): Promise<void>
+  listApiKeys(): Promise<ApiKey[]>
+  /** Returns the new key's details and the secret key, which can't be read again later. */
+  createApiKey(name: string): Promise<ApiKey & { key: string }>
+  revokeApiKey(keyId: string): Promise<void>
 
   /**
    * Listen for changes made elsewhere: `onBoard` when a board's content changes,
