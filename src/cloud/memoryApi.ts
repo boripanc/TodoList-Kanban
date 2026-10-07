@@ -1,5 +1,5 @@
 import type { Role } from '../types'
-import type { ApiKey, CloudApi, CloudUser, SentInvite } from './api'
+import type { ApiKey, CloudApi, ConnectedApp, CloudUser, SentInvite } from './api'
 import { boardRow, cardRows, columnRows, docFromRows, type BoardRow, type CardRow, type ColumnRow } from './doc'
 
 interface Invite extends SentInvite {
@@ -19,6 +19,7 @@ export class MemoryServer {
   members: { boardId: string; userId: string; role: Role }[] = []
   invites: Invite[] = []
   apiKeys: (ApiKey & { userId: string; key: string })[] = []
+  connectedApps: (ConnectedApp & { userId: string })[] = []
   private listeners = new Set<{ userId: string; onBoard: (id: string) => void; onMembership: () => void }>()
   private clock = 0
   private nextId = 1
@@ -257,6 +258,16 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
       }
       server.apiKeys.push({ ...created, userId: me().id })
       return created
+    },
+    async listConnectedApps() {
+      const userId = me().id
+      return server.connectedApps
+        .filter((a) => a.userId === userId)
+        .map(({ id, name, connectedAt, lastUsedAt }) => ({ id, name, connectedAt, lastUsedAt }))
+    },
+    async disconnectApp(appId) {
+      const userId = me().id
+      server.connectedApps = server.connectedApps.filter((a) => !(a.id === appId && a.userId === userId))
     },
     async revokeApiKey(keyId) {
       const userId = me().id

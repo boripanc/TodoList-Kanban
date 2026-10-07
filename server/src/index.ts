@@ -29,7 +29,10 @@ const events = new EventHub(db)
 await events.start()
 
 const server = new Hono()
-server.route('/', createApp({ db, events, secureCookies: process.env.COOKIE_SECURE === 'true' }))
+server.route(
+  '/',
+  createApp({ db, events, secureCookies: process.env.COOKIE_SECURE === 'true', publicUrl: process.env.PUBLIC_URL }),
+)
 
 const dist = join(root, 'dist')
 if (existsSync(dist)) {

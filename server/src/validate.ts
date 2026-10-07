@@ -272,3 +272,53 @@ export function apiKeyName(value: unknown): string {
 export function ref(value: unknown, what: string): string {
   return id(value, what)
 }
+
+// --- OAuth dynamic client registration (RFC 7591), server/src/oauth.ts ---
+
+export interface OAuthClientRegistration {
+  name: string
+  redirectUris: string[]
+  authMethod: 'none' | 'client_secret_post' | 'client_secret_basic'
+}
+
+/** Thrown for a bad registration; becomes {"error": "invalid_client_metadata"} or "invalid_redirect_uri". */
+export class BadClientMetadata extends BadRequest {
+  code: 'invalid_client_metadata' | 'invalid_redirect_uri'
+  constructor(code: BadClientMetadata['code'], message: string) {
+    super(message)
+    this.code = code
+  }
+}
+
+function redirectUri(value: unknown): string {
+  const s = typeof value === 'string' && value.length <= 2000 ? value : ''
+  let url: URL
+  try {
+    url = new URL(s)
+  } catch {
+    throw new BadClientMetadata('invalid_redirect_uri', 'redirect_uris must be absolute URLs')
+  }
+  const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'
+  if (url.hash || !(url.protocol === 'https:' || (url.protocol === 'http:' && local)))
+    throw new BadClientMetadata('invalid_redirect_uri', 'redirect_uris must use https (or http on localhost)')
+  return s
+}
+
+export function oauthClientRegistration(value: unknown): OAuthClientRegistration {
+  const r = obj(value, 'client metadata')
+  const uris = r.redirect_uris
+  if (!Array.isArray(uris) || uris.length === 0 || uris.length > 10)
+    throw new BadClientMetadata('invalid_redirect_uri', 'redirect_uris must list 1 to 10 URLs')
+  const subset = (list: unknown, allowed: string[], what: string) => {
+    if (list === undefined) return
+    if (!Array.isArray(list) || list.some((x) => !allowed.includes(x as string)))
+      throw new BadClientMetadata('invalid_client_metadata', `${what} may only include ${allowed.join(', ')}`)
+  }
+  subset(r.grant_types, ['authorization_code', 'refresh_token'], 'grant_types')
+  subset(r.response_types, ['code'], 'response_types')
+  const method = r.token_endpoint_auth_method ?? 'client_secret_basic'
+  if (method !== 'none' && method !== 'client_secret_post' && method !== 'client_secret_basic')
+    throw new BadClientMetadata('invalid_client_metadata', 'Unsupported token_endpoint_auth_method')
+  const name = typeof r.client_name === 'string' ? r.client_name.trim().slice(0, 100) : ''
+  return { name: name || 'An app', redirectUris: uris.map(redirectUri), authMethod: method }
+}

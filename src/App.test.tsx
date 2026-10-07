@@ -277,4 +277,32 @@ describe('accounts and sharing', () => {
     expect(await within(dialog).findByText('No API keys yet.')).toBeInTheDocument()
     expect(server.apiKeys).toEqual([])
   })
+
+  it('lists apps connected with sign-in and disconnects them', async () => {
+    const user = userEvent.setup()
+    const server = new MemoryServer()
+    const ana = server.addUser('ana@example.com')
+    server.connectedApps.push({
+      id: 'claude',
+      name: 'Claude',
+      connectedAt: new Date().toISOString(),
+      lastUsedAt: null,
+      userId: ana.id,
+    })
+    renderWithCloud(server.client(ana))
+    await user.click(await screen.findByRole('button', { name: 'Account: ana@example.com' }))
+    await user.click(screen.getByRole('menuitem', { name: 'API keys…' }))
+    const dialog = screen.getByRole('dialog', { name: 'API keys' })
+    expect(await within(dialog).findByText('Claude')).toBeInTheDocument()
+
+    const confirm = window.confirm
+    window.confirm = () => true
+    try {
+      await user.click(within(dialog).getByRole('button', { name: 'Disconnect Claude' }))
+    } finally {
+      window.confirm = confirm
+    }
+    expect(await within(dialog).findByText(/No apps connected/)).toBeInTheDocument()
+    expect(server.connectedApps).toEqual([])
+  })
 })

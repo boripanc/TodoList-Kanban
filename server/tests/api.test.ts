@@ -1,6 +1,7 @@
 // @vitest-environment node
 // Exercises the server API against an in-process Postgres (PGlite): accounts,
 // sharing, roles, invites and live-update notifications.
+import { createHash } from 'node:crypto'
 import { PGlite } from '@electric-sql/pglite'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.ts'
@@ -43,7 +44,7 @@ afterAll(() => db.close())
 
 beforeEach(async () => {
   await pg.exec(
-    'truncate kanban.users, kanban.sessions, kanban.boards, kanban.board_members, kanban.columns, kanban.cards, kanban.board_invites cascade',
+    'truncate kanban.users, kanban.sessions, kanban.boards, kanban.board_members, kanban.columns, kanban.cards, kanban.board_invites, kanban.oauth_clients cascade',
   )
   events = new EventHub(db)
   app = createApp({ db, events })
@@ -613,5 +614,281 @@ describe('MCP endpoint', () => {
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
     })
     expect(res.status).toBe(401)
+  })
+})
+
+describe('OAuth for MCP clients', () => {
+  const redirect = 'https://claude.ai/api/mcp/auth_callback'
+  const verifier = 'a'.repeat(20) + '-b.c~d_' + 'e'.repeat(30)
+  const challenge = createHash('sha256').update(verifier).digest('base64url')
+
+  /** A browser: keeps cookies, doesn't follow redirects. */
+  function browser() {
+    const jar = new Map<string, string>()
+    return async (path: string, init: RequestInit = {}) => {
+      const headers = new Headers(init.headers)
+      if (jar.size) headers.set('cookie', [...jar].map(([k, v]) => `${k}=${v}`).join('; '))
+      const res = await app.request(path, { ...init, headers })
+      for (const cookie of res.headers.getSetCookie()) {
+        const [pair] = cookie.split(';')
+        const [name, value] = pair.split('=')
+        jar.set(name, value)
+      }
+      return res
+    }
+  }
+
+  const form = (fields: Record<string, string>) => ({
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(fields).toString(),
+  })
+
+  async function register(extra: Record<string, unknown> = { token_endpoint_auth_method: 'none' }) {
+    const res = await app.request('/api/oauth/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ client_name: 'Claude', redirect_uris: [redirect], ...extra }),
+    })
+    return { status: res.status, data: (await res.json()) as Record<string, string> }
+  }
+
+  const authorizeQuery = (clientId: string, extra: Record<string, string> = {}) =>
+    new URLSearchParams({
+      response_type: 'code',
+      client_id: clientId,
+      redirect_uri: redirect,
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      state: 'xyz',
+      ...extra,
+    }).toString()
+
+  /** The hidden fields of the consent page, as its form would post them. */
+  const fieldsOf = (html: string) =>
+    Object.fromEntries([...html.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)">/g)].map((m) => [m[1], m[2]]))
+
+  /** Sign in on the consent page and allow; returns the code. */
+  async function authorize(clientId: string) {
+    const visit = browser()
+    const page = await visit(`/api/oauth/authorize?${authorizeQuery(clientId)}`)
+    expect(page.status).toBe(200)
+    const html = await page.text()
+    expect(html).toContain('Allow Claude to use your boards?')
+    expect(html).toContain('Sign in and allow')
+    const res = await visit(
+      '/api/oauth/authorize',
+      form({ ...fieldsOf(html), email: 'ana@example.com', password: 'correct horse', decision: 'allow' }),
+    )
+    expect(res.status).toBe(302)
+    const back = new URL(res.headers.get('location')!)
+    expect(back.origin + back.pathname).toBe(redirect)
+    expect(back.searchParams.get('state')).toBe('xyz')
+    return { code: back.searchParams.get('code')!, visit }
+  }
+
+  async function token(fields: Record<string, string>, headers: Record<string, string> = {}) {
+    const init = form(fields)
+    const res = await app.request('/api/oauth/token', { ...init, headers: { ...init.headers, ...headers } })
+    return { status: res.status, data: (await res.json()) as Record<string, string> }
+  }
+
+  const mcp = (accessToken: string, method: string, params?: unknown) =>
+    app.request('/api/mcp', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    })
+
+  it('publishes discovery documents and points MCP clients at them', async () => {
+    const headers = { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'kanban.example.com' }
+    const unauthorized = await app.request('/api/mcp', {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
+    })
+    expect(unauthorized.status).toBe(401)
+    expect(unauthorized.headers.get('www-authenticate')).toBe(
+      'Bearer resource_metadata="https://kanban.example.com/.well-known/oauth-protected-resource/api/mcp"',
+    )
+    const resource = await (await app.request('/.well-known/oauth-protected-resource/api/mcp', { headers })).json()
+    expect(resource).toMatchObject({
+      resource: 'https://kanban.example.com/api/mcp',
+      authorization_servers: ['https://kanban.example.com'],
+    })
+    const server = await (await app.request('/.well-known/oauth-authorization-server', { headers })).json()
+    expect(server).toMatchObject({
+      issuer: 'https://kanban.example.com',
+      authorization_endpoint: 'https://kanban.example.com/api/oauth/authorize',
+      token_endpoint: 'https://kanban.example.com/api/oauth/token',
+      registration_endpoint: 'https://kanban.example.com/api/oauth/register',
+      code_challenge_methods_supported: ['S256'],
+    })
+
+    const configured = createApp({ db, events, publicUrl: 'https://workstream.example.org/' })
+    const meta = await (await configured.request('/.well-known/oauth-authorization-server')).json()
+    expect(meta.issuer).toBe('https://workstream.example.org')
+  })
+
+  it('registers clients, signs in, allows, and gives working tokens that refresh', async () => {
+    const ana = await ownerWithBoard()
+    const { status, data: client } = await register()
+    expect(status).toBe(201)
+    expect(client.client_secret).toBeUndefined()
+
+    const { code } = await authorize(client.client_id)
+    const wrong = await token({
+      grant_type: 'authorization_code',
+      code,
+      client_id: client.client_id,
+      redirect_uri: redirect,
+      code_verifier: 'x'.repeat(43),
+    })
+    expect(wrong).toMatchObject({ status: 400, data: { error: 'invalid_grant' } })
+
+    // The failed attempt used up the code; sign in again for a new one.
+    const again = await authorize(client.client_id)
+    const exchange = {
+      grant_type: 'authorization_code',
+      code: again.code,
+      client_id: client.client_id,
+      redirect_uri: redirect,
+      code_verifier: verifier,
+    }
+    const issued = await token(exchange)
+    expect(issued.status).toBe(200)
+    expect(issued.data).toMatchObject({ token_type: 'Bearer', expires_in: 3600 })
+    expect((await token(exchange)).data.error).toBe('invalid_grant')
+
+    const tools = await mcp(issued.data.access_token, 'tools/call', { name: 'list_boards', arguments: {} })
+    const boards = JSON.parse(((await tools.json()) as any).result.content[0].text)
+    expect(boards).toEqual([expect.objectContaining({ id: 'b1', role: 'owner' })])
+
+    const refreshed = await token({
+      grant_type: 'refresh_token',
+      refresh_token: issued.data.refresh_token,
+      client_id: client.client_id,
+    })
+    expect(refreshed.status).toBe(200)
+    expect(refreshed.data.access_token).not.toBe(issued.data.access_token)
+    const reused = await token({
+      grant_type: 'refresh_token',
+      refresh_token: issued.data.refresh_token,
+      client_id: client.client_id,
+    })
+    expect(reused.data.error).toBe('invalid_grant')
+    expect((await mcp(refreshed.data.access_token, 'ping')).status).toBe(200)
+
+    // The app lists the connection, and disconnecting it stops its tokens.
+    const apps = (await ana.call('GET', '/connected-apps')).data
+    expect(apps).toEqual([expect.objectContaining({ id: client.client_id, name: 'Claude' })])
+    const asApp = await app.request('/api/connected-apps', {
+      headers: { authorization: `Bearer ${refreshed.data.access_token}` },
+    })
+    expect(asApp.status).toBe(403)
+    await ana.call('DELETE', `/connected-apps/${client.client_id}`)
+    expect((await mcp(refreshed.data.access_token, 'ping')).status).toBe(401)
+    const afterDisconnect = await token({
+      grant_type: 'refresh_token',
+      refresh_token: refreshed.data.refresh_token,
+      client_id: client.client_id,
+    })
+    expect(afterDisconnect.data.error).toBe('invalid_grant')
+  })
+
+  it('gives OAuth tokens their owner’s role on each board', async () => {
+    const ana = await ownerWithBoard()
+    await share(ana, 'ben@example.com', 'viewer')
+    const { data: client } = await register()
+    const visit = browser()
+    const html = await (await visit(`/api/oauth/authorize?${authorizeQuery(client.client_id)}`)).text()
+    const res = await visit(
+      '/api/oauth/authorize',
+      form({ ...fieldsOf(html), email: 'ben@example.com', password: 'correct horse', decision: 'allow' }),
+    )
+    const code = new URL(res.headers.get('location')!).searchParams.get('code')!
+    const { data } = await token({
+      grant_type: 'authorization_code',
+      code,
+      client_id: client.client_id,
+      code_verifier: verifier,
+    })
+    const refused = await mcp(data.access_token, 'tools/call', {
+      name: 'create_card',
+      arguments: { boardId: 'b1', column: 'To do', title: 'x' },
+    })
+    expect(((await refused.json()) as any).result.isError).toBe(true)
+  })
+
+  it('requires the secret of clients that registered one', async () => {
+    await ownerWithBoard()
+    const { data: client } = await register({})
+    expect(client.client_secret).toMatch(/^kbs_/)
+    const { code } = await authorize(client.client_id)
+    const fields = { grant_type: 'authorization_code', code, redirect_uri: redirect, code_verifier: verifier }
+    expect((await token({ ...fields, client_id: client.client_id })).status).toBe(401)
+    const basic = Buffer.from(`${client.client_id}:${client.client_secret}`).toString('base64')
+    const ok = await token(fields, { authorization: `Basic ${basic}` })
+    expect(ok.status).toBe(200)
+  })
+
+  it('refuses bad registrations, bad requests, forged forms and wrong passwords', async () => {
+    await ownerWithBoard()
+    expect((await register({ redirect_uris: ['http://evil.example.com/cb'] })).data.error).toBe('invalid_redirect_uri')
+    expect((await register({ redirect_uris: [] })).data.error).toBe('invalid_redirect_uri')
+    expect((await register({ grant_types: ['password'] })).data.error).toBe('invalid_client_metadata')
+    const { data: client } = await register()
+
+    expect((await app.request(`/api/oauth/authorize?${authorizeQuery('nope')}`)).status).toBe(400)
+    const elsewhere = authorizeQuery(client.client_id, { redirect_uri: 'https://evil.example.com/cb' })
+    const res = await app.request(`/api/oauth/authorize?${elsewhere}`)
+    expect(res.status).toBe(400)
+    expect(res.headers.get('location')).toBeNull()
+    const noPkce = await app.request(`/api/oauth/authorize?${authorizeQuery(client.client_id, { code_challenge_method: 'plain' })}`)
+    expect(new URL(noPkce.headers.get('location')!).searchParams.get('error')).toBe('invalid_request')
+
+    const visit = browser()
+    const html = await (await visit(`/api/oauth/authorize?${authorizeQuery(client.client_id)}`)).text()
+    const fields = fieldsOf(html)
+    const forged = await app.request(
+      '/api/oauth/authorize',
+      form({ ...fields, email: 'ana@example.com', password: 'correct horse', decision: 'allow' }),
+    )
+    expect(forged.status).toBe(400)
+    expect(forged.headers.get('location')).toBeNull()
+
+    const badPassword = await visit(
+      '/api/oauth/authorize',
+      form({ ...fields, email: 'ana@example.com', password: 'wrong', decision: 'allow' }),
+    )
+    expect(badPassword.status).toBe(400)
+    expect(await badPassword.text()).toContain('Wrong email or password.')
+
+    const html2 = await (await visit(`/api/oauth/authorize?${authorizeQuery(client.client_id)}`)).text()
+    const denied = await visit('/api/oauth/authorize', form({ ...fieldsOf(html2), decision: 'deny' }))
+    expect(new URL(denied.headers.get('location')!).searchParams.get('error')).toBe('access_denied')
+
+    expect((await token({ grant_type: 'password', client_id: client.client_id })).data.error).toBe(
+      'unsupported_grant_type',
+    )
+    expect((await token({ grant_type: 'authorization_code', client_id: 'nope' })).status).toBe(401)
+    expect((await mcp('kbo_nope', 'ping')).headers.get('www-authenticate')).toContain('error="invalid_token"')
+  })
+
+  it('skips the password for someone already signed in to the app', async () => {
+    const ana = await ownerWithBoard()
+    const { data: client } = await register()
+    // Reuse the app session by signing in through a browser.
+    const visit = browser()
+    await visit('/api/auth/signin', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'ana@example.com', password: 'correct horse' }),
+    })
+    const html = await (await visit(`/api/oauth/authorize?${authorizeQuery(client.client_id)}`)).text()
+    expect(html).toContain('Signed in as <strong>ana@example.com</strong>')
+    const res = await visit('/api/oauth/authorize', form({ ...fieldsOf(html), decision: 'allow' }))
+    expect(new URL(res.headers.get('location')!).searchParams.get('code')).toBeTruthy()
+    expect(ana.user.email).toBe('ana@example.com')
   })
 })
