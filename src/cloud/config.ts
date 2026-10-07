@@ -10,3 +10,9 @@ export function createCloudApi(): CloudApi | null {
   const url = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api'
   return url && url !== 'off' ? createServerApi(url) : null
 }
+
+/** The API's full address, for setting up automation tools such as n8n. */
+export function apiBaseUrl(): string {
+  const url = (import.meta.env.VITE_API_URL as string | undefined) || '/api'
+  return new URL(url === 'off' ? '/api' : url, window.location.origin).href.replace(/\/$/, '')
+}

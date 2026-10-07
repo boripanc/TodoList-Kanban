@@ -4,14 +4,16 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { HTTPException } from 'hono/http-exception'
 import { streamSSE } from 'hono/streaming'
 import type { CardRow, ColumnRow } from '../../src/cloud/doc.ts'
-import { hashPassword, hashToken, MIN_PASSWORD_LENGTH, newToken, verifyPassword } from './auth.ts'
+import { fail, requireRole, type Role, type User } from './access.ts'
+import { API_TOKEN_PREFIX, hashPassword, hashToken, MIN_PASSWORD_LENGTH, newToken, verifyPassword } from './auth.ts'
 import type { Db, Queryable } from './db.ts'
 import type { EventHub } from './events.ts'
+import { handleMcp } from './mcp.ts'
+import { openApiSpec } from './openapi.ts'
+import { restApi } from './rest.ts'
 import * as v from './validate.ts'
 
-type Role = 'owner' | 'editor' | 'viewer'
-type User = { id: string; email: string }
-type Env = { Variables: { user: User } }
+type Env = { Variables: { user: User; viaToken: boolean } }
 
 export const SESSION_COOKIE = 'kanban_session'
 const SESSION_DAYS = 30
@@ -21,10 +23,6 @@ export interface AppOptions {
   events: EventHub
   /** Mark the session cookie Secure (set when serving over https). */
   secureCookies?: boolean
-}
-
-const fail = (status: 400 | 401 | 403 | 404 | 409 | 429, message: string): never => {
-  throw new HTTPException(status, { message })
 }
 
 /** Simple in-memory limit on failed sign-ins per email, to slow down password guessing. */
@@ -63,9 +61,11 @@ export function createApp({ db, events, secureCookies = false }: AppOptions) {
 
   // Changes must be JSON: browsers can't send that cross-site without a CORS
   // preflight, which this server never allows. Together with SameSite cookies
-  // this stops other sites from acting as a signed-in user.
+  // this stops other sites from acting as a signed-in user. Requests with an
+  // API token are exempt: browsers can't add that header cross-site either,
+  // and automation tools often send a DELETE with no body.
   app.use(async (c, next) => {
-    if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
+    if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && !bearer(c)) {
       if (!c.req.header('content-type')?.startsWith('application/json')) fail(400, 'Expected JSON')
     }
     await next()
@@ -94,7 +94,29 @@ export function createApp({ db, events, secureCookies = false }: AppOptions) {
     })
   }
 
+  /** The API token in an `Authorization: Bearer ...` header, if the request has one. */
+  function bearer(c: Context): string | undefined {
+    const header = c.req.header('authorization')
+    return header?.match(/^Bearer\s+(\S+)\s*$/i)?.[1]
+  }
+
   async function currentUser(c: Context): Promise<User | null> {
+    const apiToken = bearer(c)
+    if (apiToken !== undefined) {
+      // With a token, only the token counts, not a session cookie that came along.
+      if (!apiToken.startsWith(API_TOKEN_PREFIX)) return null
+      const { rows } = await db.query<User & { token_id: string; last_used_at: Date | null }>(
+        `select u.id, u.email, t.id as token_id, t.last_used_at from kanban.api_tokens t
+         join kanban.users u on u.id = t.user_id where t.token_hash = $1`,
+        [hashToken(apiToken)],
+      )
+      const row = rows[0]
+      if (!row) return null
+      if (!row.last_used_at || Date.now() - new Date(row.last_used_at).getTime() > 60_000) {
+        await db.query('update kanban.api_tokens set last_used_at = now() where id = $1', [row.token_id])
+      }
+      return { id: row.id, email: row.email }
+    }
     const token = getCookie(c, SESSION_COOKIE)
     if (!token) return null
     const { rows } = await db.query<User>(
@@ -151,28 +173,73 @@ export function createApp({ db, events, secureCookies = false }: AppOptions) {
 
   app.get('/auth/me', async (c) => c.json({ user: await currentUser(c) }))
 
-  // Everything below needs a signed-in user.
+  app.get('/v1/openapi.json', (c) => c.json(openApiSpec()))
+
+  // Everything below needs a signed-in user, or an API token.
   app.use(async (c, next) => {
     const user = await currentUser(c)
-    if (!user) fail(401, 'Sign in first')
+    if (!user) {
+      if (bearer(c) !== undefined) {
+        c.header('WWW-Authenticate', 'Bearer')
+        fail(401, 'Unknown or revoked API token')
+      }
+      fail(401, 'Sign in first')
+    }
     c.set('user', user!)
+    c.set('viaToken', bearer(c) !== undefined)
     await next()
   })
 
-  async function roleOf(q: Queryable, boardId: string, userId: string): Promise<Role | undefined> {
-    const { rows } = await q.query<{ role: Role }>(
-      'select role from kanban.board_members where board_id = $1 and user_id = $2',
-      [boardId, userId],
-    )
-    return rows[0]?.role
+  // --- API tokens (managed in the app, with a signed-in session) ---
+
+  const sessionOnly = (c: Context<Env>) => {
+    if (c.get('viaToken')) fail(403, 'API tokens cannot manage API tokens. Use the app.')
   }
 
-  async function requireRole(q: Queryable, boardId: string, userId: string, allowed: Role[]) {
-    const role = await roleOf(q, boardId, userId)
-    if (!role) fail(404, 'Board not found')
-    if (!allowed.includes(role!)) fail(403, 'You do not have permission to do that')
-    return role!
-  }
+  app.get('/tokens', async (c) => {
+    sessionOnly(c)
+    const { rows } = await db.query<{ id: string; name: string; created_at: Date; last_used_at: Date | null }>(
+      'select id, name, created_at, last_used_at from kanban.api_tokens where user_id = $1 order by created_at',
+      [c.get('user').id],
+    )
+    return c.json(
+      rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        createdAt: new Date(r.created_at).toISOString(),
+        lastUsedAt: r.last_used_at && new Date(r.last_used_at).toISOString(),
+      })),
+    )
+  })
+
+  app.post('/tokens', async (c) => {
+    sessionOnly(c)
+    const name = v.tokenName((await body(c)).name)
+    const token = API_TOKEN_PREFIX + newToken()
+    const { rows } = await db.query<{ id: string; created_at: Date }>(
+      'insert into kanban.api_tokens (user_id, name, token_hash) values ($1, $2, $3) returning id, created_at',
+      [c.get('user').id, name, hashToken(token)],
+    )
+    return c.json({ id: rows[0].id, name, createdAt: new Date(rows[0].created_at).toISOString(), lastUsedAt: null, token })
+  })
+
+  app.delete('/tokens/:id', async (c) => {
+    sessionOnly(c)
+    await db.query('delete from kanban.api_tokens where id = $1 and user_id = $2', [
+      v.uuid(c.req.param('id')),
+      c.get('user').id,
+    ])
+    return c.json({ ok: true })
+  })
+
+  // --- REST API and MCP for automation (n8n, AI agents) ---
+
+  app.route('/v1', restApi(db))
+  app.post('/mcp', (c) => handleMcp(c, db, c.get('user')))
+  app.on(['GET', 'DELETE'], '/mcp', (c) => {
+    c.header('Allow', 'POST')
+    return c.json({ error: 'This MCP server answers POST requests only (no event stream).' }, 405)
+  })
 
   // --- Boards ---
 

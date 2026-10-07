@@ -27,3 +27,6 @@ export function hashToken(token: string): string {
 }
 
 export const MIN_PASSWORD_LENGTH = 8
+
+/** Personal API tokens start with this, so they are easy to spot (and to scan for in leaked text). */
+export const API_TOKEN_PREFIX = 'kbn_'
