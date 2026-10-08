@@ -79,6 +79,24 @@ describe('App', () => {
     expect(within(card).getByText('60%')).toBeInTheDocument()
   })
 
+  it('shows the latest progress update on a card and toggles the recent ones', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    const card = screen.getByRole('button', { name: 'Card: Drag me to another column' })
+    const latest = within(card).getByRole('list', { name: 'Latest progress' })
+    expect(within(latest).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Reordered the columns too'])
+
+    await user.click(within(card).getByRole('button', { name: 'Show progress updates' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(within(latest).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(latest).getByText('Tried dragging between columns')).toBeInTheDocument()
+
+    within(card).getByRole('button', { name: 'Hide progress updates' }).focus()
+    await user.keyboard('{Enter}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(within(latest).getAllByRole('listitem')).toHaveLength(1)
+  })
+
   it('creates a new board from a template', async () => {
     const user = userEvent.setup()
     renderApp()
