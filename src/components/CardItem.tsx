@@ -4,7 +4,8 @@ import { CSS } from '@dnd-kit/utilities'
 import type { Card, Label } from '../types'
 import { dueStatus, formatDue } from '../lib/dates'
 import { priorityLabel } from '../lib/priority'
-import { isProgressExpanded, setProgressExpanded } from '../lib/expanded'
+import { isExpanded, setExpanded, type ExpandablePart } from '../lib/expanded'
+import { useStore } from '../state/context'
 
 interface CardViewProps {
   card: Card
@@ -13,6 +14,11 @@ interface CardViewProps {
   /** Show the recent progress updates, not just the latest one. */
   expanded?: boolean
   onToggleProgress?: () => void
+  /** Show the checklist items on the card. */
+  checklistOpen?: boolean
+  onToggleChecklist?: () => void
+  /** Tick or untick a checklist item; left out where items can't be changed. */
+  onToggleItem?: (itemId: string) => void
 }
 
 const shortDate = (at: number) => new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
@@ -20,11 +26,34 @@ const shortDate = (at: number) => new Date(at).toLocaleDateString(undefined, { m
 /** How many progress updates an expanded card shows. */
 const RECENT_UPDATES = 3
 
+// Clicks and keys on controls inside a card shouldn't open the card or start a drag.
+const stop = (e: React.SyntheticEvent) => e.stopPropagation()
+const insideCard = { onPointerDown: stop, onKeyDown: stop }
+
+function CardChecklist({ card, onToggleItem }: { card: Card; onToggleItem?: (itemId: string) => void }) {
+  return (
+    <ul className="card-checklist" aria-label="Checklist">
+      {card.checklist.map((item) => (
+        <li key={item.id}>
+          <label onClick={stop}>
+            <input
+              type="checkbox"
+              checked={item.done}
+              disabled={!onToggleItem}
+              onChange={() => onToggleItem?.(item.id)}
+              {...insideCard}
+            />
+            <span className={item.done ? 'done' : undefined}>{item.text}</span>
+          </label>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function CardProgress({ card, expanded, onToggle }: { card: Card; expanded: boolean; onToggle?: () => void }) {
   const updates = card.progressLog.filter((e) => e.text).reverse()
   const shown = expanded ? updates.slice(0, RECENT_UPDATES) : updates.slice(0, 1)
-  // Clicks and keys on the toggle shouldn't open the card or start a drag.
-  const stop = (e: React.SyntheticEvent) => e.stopPropagation()
   return (
     <div className="card-progress-section">
       {card.progress !== null && (
@@ -62,8 +91,7 @@ function CardProgress({ card, expanded, onToggle }: { card: Card; expanded: bool
                 stop(e)
                 onToggle()
               }}
-              onPointerDown={stop}
-              onKeyDown={stop}
+              {...insideCard}
             >
               {expanded
                 ? '▴ Less'
@@ -76,7 +104,16 @@ function CardProgress({ card, expanded, onToggle }: { card: Card; expanded: bool
   )
 }
 
-export function CardView({ card, labels, overlay, expanded = false, onToggleProgress }: CardViewProps) {
+export function CardView({
+  card,
+  labels,
+  overlay,
+  expanded = false,
+  onToggleProgress,
+  checklistOpen = false,
+  onToggleChecklist,
+  onToggleItem,
+}: CardViewProps) {
   const cardLabels = labels.filter((label) => card.labelIds.includes(label.id))
   const doneCount = card.checklist.filter((item) => item.done).length
   const status = card.dueDate ? dueStatus(card.dueDate) : null
@@ -106,11 +143,27 @@ export function CardView({ card, labels, overlay, expanded = false, onToggleProg
               📅 {formatDue(card.dueDate)}
             </span>
           )}
-          {card.checklist.length > 0 && (
-            <span className={`badge ${checklistDone ? 'checklist-done' : ''}`} title="Checklist">
-              ☑ {doneCount}/{card.checklist.length}
-            </span>
-          )}
+          {card.checklist.length > 0 &&
+            (onToggleChecklist ? (
+              <button
+                type="button"
+                className={`badge badge-button ${checklistDone ? 'checklist-done' : ''}`}
+                title={checklistOpen ? 'Hide checklist' : 'Show checklist'}
+                aria-label={`${checklistOpen ? 'Hide' : 'Show'} checklist, ${doneCount} of ${card.checklist.length} done`}
+                aria-expanded={checklistOpen}
+                onClick={(e) => {
+                  stop(e)
+                  onToggleChecklist()
+                }}
+                {...insideCard}
+              >
+                {checklistOpen ? '▴' : '▾'} ☑ {doneCount}/{card.checklist.length}
+              </button>
+            ) : (
+              <span className={`badge ${checklistDone ? 'checklist-done' : ''}`} title="Checklist">
+                ☑ {doneCount}/{card.checklist.length}
+              </span>
+            ))}
           {card.description && (
             <span className="badge badge-plain" title="Has notes" aria-label="Has notes">
               ≡
@@ -118,6 +171,7 @@ export function CardView({ card, labels, overlay, expanded = false, onToggleProg
           )}
         </div>
       )}
+      {checklistOpen && card.checklist.length > 0 && <CardChecklist card={card} onToggleItem={onToggleItem} />}
       {(card.progress !== null || card.progressLog.length > 0) && (
         <CardProgress card={card} expanded={expanded} onToggle={onToggleProgress} />
       )}
@@ -133,7 +187,13 @@ interface CardItemProps {
 }
 
 export function CardItem({ card, labels, onOpen, readOnly = false }: CardItemProps) {
-  const [expanded, setExpanded] = useState(() => isProgressExpanded(card.id))
+  const { dispatch } = useStore()
+  const [progressOpen, setProgressOpen] = useState(() => isExpanded('progress', card.id))
+  const [checklistOpen, setChecklistOpen] = useState(() => isExpanded('checklist', card.id))
+  const toggle = (part: ExpandablePart, open: boolean, set: (open: boolean) => void) => () => {
+    setExpanded(part, card.id, !open)
+    set(!open)
+  }
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
     data: { type: 'card' },
@@ -158,11 +218,21 @@ export function CardItem({ card, labels, onOpen, readOnly = false }: CardItemPro
       <CardView
         card={card}
         labels={labels}
-        expanded={expanded}
-        onToggleProgress={() => {
-          setProgressExpanded(card.id, !expanded)
-          setExpanded(!expanded)
-        }}
+        expanded={progressOpen}
+        onToggleProgress={toggle('progress', progressOpen, setProgressOpen)}
+        checklistOpen={checklistOpen}
+        onToggleChecklist={toggle('checklist', checklistOpen, setChecklistOpen)}
+        onToggleItem={
+          readOnly
+            ? undefined
+            : (itemId) =>
+                dispatch({
+                  type: 'card/update',
+                  cardId: card.id,
+                  patch: { checklist: card.checklist.map((i) => (i.id === itemId ? { ...i, done: !i.done } : i)) },
+                  now: Date.now(),
+                })
+        }
       />
     </li>
   )

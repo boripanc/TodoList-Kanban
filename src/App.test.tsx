@@ -97,6 +97,31 @@ describe('App', () => {
     expect(within(latest).getAllByRole('listitem')).toHaveLength(1)
   })
 
+  it('opens a card’s checklist on the board and ticks items there', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    const card = screen.getByRole('button', { name: 'Card: Plan next sprint' })
+    expect(within(card).queryByRole('list', { name: 'Checklist' })).not.toBeInTheDocument()
+
+    await user.click(within(card).getByRole('button', { name: 'Show checklist, 0 of 3 done' }))
+    const list = within(card).getByRole('list', { name: 'Checklist' })
+    await user.click(within(list).getByRole('checkbox', { name: 'Review backlog' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(within(list).getByRole('checkbox', { name: 'Review backlog' })).toBeChecked()
+
+    // Space ticks the focused item instead of starting a drag.
+    within(list).getByRole('checkbox', { name: 'Estimate stories' }).focus()
+    await user.keyboard(' ')
+    expect(within(list).getByRole('checkbox', { name: 'Estimate stories' })).toBeChecked()
+
+    await user.click(within(card).getByRole('button', { name: 'Hide checklist, 2 of 3 done' }))
+    expect(within(card).queryByRole('list', { name: 'Checklist' })).not.toBeInTheDocument()
+
+    // The card dialog shows the same ticks.
+    await user.click(screen.getByText('Plan next sprint'))
+    expect(within(screen.getByRole('dialog')).getByText('Checklist (2/3)')).toBeInTheDocument()
+  })
+
   it('creates a new board from a template', async () => {
     const user = userEvent.setup()
     renderApp()

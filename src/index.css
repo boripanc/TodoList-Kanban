@@ -628,6 +628,40 @@ small.due-hint {
 .card-progress.complete .progress-bar {
   background: var(--ok);
 }
+.badge-button {
+  border: none;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.badge-button:hover {
+  color: var(--text);
+}
+.badge-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.card-checklist {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  font-size: 0.8rem;
+}
+.card-checklist label {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 0;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.card-checklist input {
+  margin: 2px 0 0;
+}
+.card-checklist .done {
+  text-decoration: line-through;
+  color: var(--muted);
+}
 .card-progress-notes {
   margin-top: 4px;
   font-size: 0.8rem;
