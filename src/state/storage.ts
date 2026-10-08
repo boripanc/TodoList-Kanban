@@ -87,6 +87,7 @@ export function createSampleState(): AppState {
     const id = createId()
     state = reducer(state, { type: 'card/add', columnId, id, title, now })
     state = reducer(state, { type: 'card/update', cardId: id, patch: cardPatch(patch), now })
+    return id
   }
 
   add(backlog, 'Explore keyboard shortcuts', {
@@ -100,13 +101,20 @@ export function createSampleState(): AppState {
     checklist: ['Review backlog', 'Estimate stories', 'Agree on goals'],
   })
   add(todo, 'Fix login timeout', { priority: 'urgent', dueDate: addDays(-1), labelIds: [label('Bug')] })
-  add(doing, 'Drag me to another column', {
+  const dragCard = add(doing, 'Drag me to another column', {
     description: 'Cards and columns can both be reordered by dragging.',
     priority: 'medium',
     labelIds: [label('Feature')],
     dueDate: addDays(0),
     progress: 40,
   })
+  for (const [text, progress, ago] of [
+    ['Tried dragging between columns', 20, 2],
+    ['Reordered the columns too', 40, 1],
+  ] as const) {
+    const at = now - ago * 86_400_000
+    state = reducer(state, { type: 'card/logProgress', cardId: dragCard, id: createId(), text, progress, now: at })
+  }
   add(review, 'Click a card to edit details', {
     description: 'Add labels, a due date, a priority, a checklist or notes.',
     priority: 'low',
