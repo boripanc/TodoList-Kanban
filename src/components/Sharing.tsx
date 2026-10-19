@@ -32,7 +32,7 @@ export function SignInPage({ cloud }: { cloud: Cloud }) {
     <main className="sign-in-page" aria-label={title}>
       <form className="sign-in-card stack" onSubmit={submit}>
         <p className="sign-in-brand" aria-hidden>
-          ▦ TodoList Kanban
+          ▦ Work Stream
         </p>
         <h1>{title}</h1>
         <p className="muted">

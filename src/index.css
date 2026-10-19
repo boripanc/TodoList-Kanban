@@ -179,6 +179,8 @@ h2 {
   flex-direction: column;
   height: 100vh;
   height: 100dvh;
+  /* Keep clear of the notch and home bar when installed as an app; 0 in a browser tab. */
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
 .topbar {
@@ -187,6 +189,7 @@ h2 {
   gap: 8px;
   flex-wrap: wrap;
   padding: 10px 16px;
+  padding-top: calc(10px + env(safe-area-inset-top));
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
@@ -525,7 +528,7 @@ small.due-hint {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 48px 16px;
+  padding: calc(48px + env(safe-area-inset-top)) 16px calc(48px + env(safe-area-inset-bottom));
   overflow-y: auto;
 }
 .modal {
@@ -988,7 +991,7 @@ fieldset.card-editor:disabled .card-editor-title {
     grid-template-columns: 1fr;
   }
   .modal-backdrop {
-    padding: 16px;
+    padding: calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
   }
 }
 
@@ -999,7 +1002,8 @@ fieldset.card-editor:disabled .card-editor-title {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px 16px;
+  padding: calc(24px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+    calc(24px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
   background: var(--bg);
 }
 .sign-in-card {

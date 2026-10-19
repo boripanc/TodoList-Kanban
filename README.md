@@ -65,6 +65,10 @@ How it works:
 
 Behind a reverse proxy, forward `/api` to the server and keep the app on the same origin, so the session cookie is sent.
 
+## iPhone app
+
+`ios/` holds an iPhone app made with Capacitor. It opens the live site full screen with its own icon, so sign-in, shared boards and live updates work as in Safari, and site deploys reach the app without a new release. Building it needs an Apple Developer account; a GitHub Actions workflow builds and uploads it to TestFlight without a Mac. See [docs/ios.md](docs/ios.md).
+
 ## Automation: REST API, MCP and n8n
 
 With accounts on, other tools can manage boards for you. Each person creates their own **API keys** in the app (account menu → **API keys…**). A key acts as that person, with their role on each board: viewers can only read, editors and owners can change, and only owners can delete a board. The key is shown once; the server keeps only a hash of it. Revoke it from the same dialog. Resetting someone's password with `server:set-password` also revokes their API keys.

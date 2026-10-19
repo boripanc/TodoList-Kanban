@@ -106,7 +106,7 @@ export default function App() {
             )}
           </select>
         ) : (
-          <h1 className="board-select">Kanban</h1>
+          <h1 className="board-select">Work Stream</h1>
         )}
         <button className="button" onClick={() => setDialog('new-board')}>
           + New board
