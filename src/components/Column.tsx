@@ -6,6 +6,7 @@ import { useStore } from '../state/context'
 import { createId } from '../lib/id'
 import { CardItem } from './CardItem'
 import { Menu } from './Menu'
+import { DONE_VISIBLE_LIMIT, isDoneColumn } from '../lib/done'
 
 interface ColumnProps {
   boardId: string
@@ -14,14 +15,32 @@ interface ColumnProps {
   totalCount: number
   labels: Label[]
   onOpenCard: (cardId: string) => void
+  /** While searching or filtering, done columns show every match. */
+  filterActive?: boolean
   readOnly?: boolean
 }
 
-export function Column({ boardId, column, cards, totalCount, labels, onOpenCard, readOnly = false }: ColumnProps) {
+export function Column({
+  boardId,
+  column,
+  cards,
+  totalCount,
+  labels,
+  onOpenCard,
+  filterActive = false,
+  readOnly = false,
+}: ColumnProps) {
   const { dispatch } = useStore()
   const [editingTitle, setEditingTitle] = useState(false)
   const [composing, setComposing] = useState(false)
   const [draft, setDraft] = useState('')
+  const [showOlder, setShowOlder] = useState(false)
+
+  // Done columns keep only the last few finished cards in view; moves land at the bottom,
+  // so the oldest are at the top. Hidden cards stay on the board.
+  const olderCount =
+    isDoneColumn(column.title) && !filterActive ? Math.max(0, cards.length - DONE_VISIBLE_LIMIT) : 0
+  const shownCards = olderCount > 0 && !showOlder ? cards.slice(olderCount) : cards
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: column.id,
@@ -123,9 +142,19 @@ export function Column({ boardId, column, cards, totalCount, labels, onOpenCard,
         )}
       </header>
 
-      <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+      {olderCount > 0 && (
+        <button
+          className="older-toggle"
+          aria-expanded={showOlder}
+          onClick={() => setShowOlder((open) => !open)}
+        >
+          {showOlder ? 'Hide older cards' : `Show ${olderCount} older ${olderCount === 1 ? 'card' : 'cards'}`}
+        </button>
+      )}
+
+      <SortableContext items={shownCards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
         <ul className="card-list">
-          {cards.map((card) => (
+          {shownCards.map((card) => (
             <CardItem key={card.id} card={card} labels={labels} onOpen={onOpenCard} readOnly={readOnly} />
           ))}
           {cards.length === 0 && (
