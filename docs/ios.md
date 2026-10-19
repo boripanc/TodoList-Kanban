@@ -21,7 +21,7 @@ What lives where:
 ## One-time setup in App Store Connect
 
 1. In <https://developer.apple.com/account/resources/identifiers/list>, add an **App ID** with the bundle ID `info.teddybiere.workstream` (you can use a different ID; change `appId` in `capacitor.config.ts` and the bundle identifier in Xcode to match).
-2. In <https://appstoreconnect.apple.com>, choose **Apps → + → New App**: platform iOS, a name (it must be unique on the App Store, so "Workstream" alone may be taken), the bundle ID from step 1, and any SKU, e.g. `workstream-ios`.
+2. In <https://appstoreconnect.apple.com>, choose **Apps → + → New App**: platform iOS, a name (it must be unique on the App Store, so "Work Stream" alone may be taken), the bundle ID from step 1, and any SKU, e.g. `workstream-ios`.
 
 ## Build and upload without a Mac (GitHub Actions)
 

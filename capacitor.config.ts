@@ -12,7 +12,7 @@ const serverUrl = process.env.CAP_SERVER_URL ?? 'https://workstream.teddybiere.i
 
 const config: CapacitorConfig = {
   appId: 'info.teddybiere.workstream',
-  appName: 'Workstream',
+  appName: 'Work Stream',
   // Shown only when the site can't be reached (see errorPath).
   webDir: 'ios-shell',
   server: {

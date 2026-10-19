@@ -136,7 +136,7 @@ function consentPage(opts: {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Allow access · TodoList Kanban</title>
+<title>Allow access · Work Stream</title>
 <style>
   :root { --bg: #f4f5f7; --surface: #fff; --text: #1c2024; --muted: #60646c; --border: #d5d7de; --accent: #0d74ce; --accent-text: #fff; --danger: #ce2c31; color-scheme: light dark; }
   @media (prefers-color-scheme: dark) { :root { --bg: #111113; --surface: #212225; --text: #edeef0; --muted: #a0a2a9; --border: #3a3b40; --accent: #3b9eff; --accent-text: #0b0b0c; --danger: #ff6369; } }
@@ -172,7 +172,7 @@ function consentPage(opts: {
 }
 
 function errorPage(message: string) {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Can't connect · TodoList Kanban</title></head>
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Can't connect · Work Stream</title></head>
 <body style="font: 15px/1.5 system-ui, sans-serif; padding: 24px; max-width: 480px; margin: auto"><h1 style="font-size: 1.25rem">Can't connect this app</h1><p>${escape(message)}</p></body></html>`
 }
 
