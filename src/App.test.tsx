@@ -38,6 +38,30 @@ describe('App', () => {
     expect(within(backlog).getByText('Call the bank')).toBeInTheDocument()
   })
 
+  it('shows only the last 5 cards in a done column, with a toggle for older ones', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    const done = screen.getByRole('region', { name: 'Column: Done' })
+    await user.click(within(done).getByRole('button', { name: '+ Add card' }))
+    for (let i = 1; i <= 5; i++) {
+      await user.type(within(done).getByLabelText('New card title'), `Finished ${i}{Enter}`)
+    }
+    // The sample card plus five new ones: the oldest folds away.
+    expect(within(done).queryByText('Set up the board')).not.toBeInTheDocument()
+    expect(within(done).getByText('Finished 1')).toBeInTheDocument()
+    expect(within(done).getByText('Finished 5')).toBeInTheDocument()
+    expect(within(done).getByText('6')).toBeInTheDocument()
+
+    await user.click(within(done).getByRole('button', { name: 'Show 1 older card' }))
+    expect(within(done).getByText('Set up the board')).toBeInTheDocument()
+    await user.click(within(done).getByRole('button', { name: 'Hide older cards' }))
+    expect(within(done).queryByText('Set up the board')).not.toBeInTheDocument()
+
+    // Searching still finds hidden cards.
+    await user.type(screen.getByLabelText('Search cards'), 'set up')
+    expect(within(done).getByText('Set up the board')).toBeInTheDocument()
+  })
+
   it('filters cards with search', async () => {
     const user = userEvent.setup()
     renderApp()

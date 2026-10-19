@@ -18,7 +18,7 @@ import { SortableContext, horizontalListSortingStrategy, sortableKeyboardCoordin
 import type { Board as BoardType, Card, CardFilter } from '../types'
 import { useStore } from '../state/context'
 import { findColumnOfCard } from '../state/reducer'
-import { matchesFilter } from '../lib/filter'
+import { isFilterActive, matchesFilter } from '../lib/filter'
 import { createId } from '../lib/id'
 import { Column } from './Column'
 import { CardView } from './CardItem'
@@ -160,6 +160,7 @@ export function Board({ board, filter, onOpenCard, readOnly = false }: BoardProp
                 column={column}
                 cards={visibleCards[column.id] ?? []}
                 totalCount={column.cardIds.length}
+                filterActive={isFilterActive(filter)}
                 labels={board.labels}
                 onOpenCard={openCard}
                 readOnly={readOnly}

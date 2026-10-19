@@ -328,6 +328,20 @@ h2 {
   overflow-y: auto;
   min-height: 40px;
 }
+.older-toggle {
+  margin: 0 0 8px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.older-toggle:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
 .column-empty {
   border: 1px dashed var(--border);
   border-radius: 6px;
