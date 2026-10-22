@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -38,6 +38,17 @@ export function Board({ board, filter, onOpenCard, readOnly = false }: BoardProp
   const [active, setActive] = useState<ActiveDrag>(null)
   const [addingColumn, setAddingColumn] = useState(false)
   const lastDragEnd = useRef(0)
+  // A card that just changed columns stays put until the browser has painted. Otherwise a card
+  // straddling two columns can flip between them on every render and crash React (error #185).
+  const movedThisFrame = useRef(false)
+
+  useEffect(() => {
+    if (!movedThisFrame.current) return
+    const frame = requestAnimationFrame(() => {
+      movedThisFrame.current = false
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [state.columns])
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
@@ -81,6 +92,20 @@ export function Board({ board, filter, onOpenCard, readOnly = false }: BoardProp
     return findColumnOfCard(state, overId)?.id
   }
 
+  /** Where a card dropped on `over` lands in that column: above or below the card it covers, or at the end. */
+  const dropIndex = (
+    columnId: string,
+    active: DragOverEvent['active'],
+    over: NonNullable<DragOverEvent['over']>,
+  ): number => {
+    const target = state.columns[columnId]
+    const overIndex = target.cardIds.indexOf(String(over.id))
+    if (overIndex < 0) return target.cardIds.length
+    const activeRect = active.rect.current.translated
+    const below = activeRect && activeRect.top > over.rect.top + over.rect.height / 2
+    return overIndex + (below ? 1 : 0)
+  }
+
   const onDragStart = ({ active }: DragStartEvent) => {
     setActive({ type: active.data.current?.type === 'column' ? 'column' : 'card', id: String(active.id) })
   }
@@ -91,16 +116,9 @@ export function Board({ board, filter, onOpenCard, readOnly = false }: BoardProp
     const overId = String(over.id)
     const from = findColumnOfCard(state, cardId)
     const toColumnId = columnForOver(overId)
-    if (!from || !toColumnId || from.id === toColumnId) return
-    const target = state.columns[toColumnId]
-    const overIndex = target.cardIds.indexOf(overId)
-    let toIndex = target.cardIds.length
-    if (overIndex >= 0) {
-      const activeRect = active.rect.current.translated
-      const below = activeRect && activeRect.top > over.rect.top + over.rect.height / 2
-      toIndex = overIndex + (below ? 1 : 0)
-    }
-    dispatch({ type: 'card/move', cardId, toColumnId, toIndex })
+    if (!from || !toColumnId || from.id === toColumnId || movedThisFrame.current) return
+    movedThisFrame.current = true
+    dispatch({ type: 'card/move', cardId, toColumnId, toIndex: dropIndex(toColumnId, active, over) })
   }
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
@@ -124,6 +142,12 @@ export function Board({ board, filter, onOpenCard, readOnly = false }: BoardProp
 
     const column = findColumnOfCard(state, activeId)
     if (!column || activeId === overId) return
+    // A card held back from changing columns mid-drag still lands where it is dropped.
+    const toColumnId = columnForOver(overId)
+    if (toColumnId && toColumnId !== column.id) {
+      dispatch({ type: 'card/move', cardId: activeId, toColumnId, toIndex: dropIndex(toColumnId, active, over) })
+      return
+    }
     const overIndex = column.cardIds.indexOf(overId)
     if (overIndex >= 0) {
       dispatch({ type: 'card/move', cardId: activeId, toColumnId: column.id, toIndex: overIndex })
@@ -161,6 +185,7 @@ export function Board({ board, filter, onOpenCard, readOnly = false }: BoardProp
                 cards={visibleCards[column.id] ?? []}
                 totalCount={column.cardIds.length}
                 filterActive={isFilterActive(filter)}
+                activeCardId={active?.type === 'card' ? active.id : undefined}
                 labels={board.labels}
                 onOpenCard={openCard}
                 readOnly={readOnly}

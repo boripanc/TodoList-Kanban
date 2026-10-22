@@ -17,6 +17,8 @@ interface ColumnProps {
   onOpenCard: (cardId: string) => void
   /** While searching or filtering, done columns show every match. */
   filterActive?: boolean
+  /** The card being dragged, which stays in view even where older done cards fold away. */
+  activeCardId?: string
   readOnly?: boolean
 }
 
@@ -28,6 +30,7 @@ export function Column({
   labels,
   onOpenCard,
   filterActive = false,
+  activeCardId,
   readOnly = false,
 }: ColumnProps) {
   const { dispatch } = useStore()
@@ -37,10 +40,13 @@ export function Column({
   const [showOlder, setShowOlder] = useState(false)
 
   // Done columns keep only the last few finished cards in view; moves land at the bottom,
-  // so the oldest are at the top. Hidden cards stay on the board.
+  // so the oldest are at the top. Hidden cards stay on the board. The card being dragged is
+  // never folded away, so it can't vanish under the pointer.
   const olderCount =
     isDoneColumn(column.title) && !filterActive ? Math.max(0, cards.length - DONE_VISIBLE_LIMIT) : 0
-  const shownCards = olderCount > 0 && !showOlder ? cards.slice(olderCount) : cards
+  const settled = activeCardId ? cards.filter((card) => card.id !== activeCardId) : cards
+  const hidden = new Set(olderCount > 0 && !showOlder ? settled.slice(0, olderCount).map((card) => card.id) : [])
+  const shownCards = hidden.size > 0 ? cards.filter((card) => !hidden.has(card.id)) : cards
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: column.id,
