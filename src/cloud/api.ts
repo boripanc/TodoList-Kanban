@@ -1,4 +1,5 @@
 import type { Role } from '../types'
+import type { CredentialKind } from '../lib/credentials'
 import type { BoardDoc, BoardOps, BoardSummary } from './doc'
 
 export interface CloudUser {
@@ -45,6 +46,66 @@ export interface ConnectedApp {
   lastUsedAt: string | null
 }
 
+/** A person in the user's own address book. */
+export interface Contact {
+  id: string
+  name: string
+  company: string
+  jobTitle: string
+  email: string
+  phone: string
+  website: string
+  address: string
+  notes: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type ContactInput = Omit<Contact, 'id' | 'createdAt' | 'updatedAt'>
+
+/** One field of a credential. Secret values are encrypted on the server and left out (null) of lists. */
+export interface CredentialField {
+  name: string
+  value: string | null
+  secret: boolean
+  multiline: boolean
+}
+
+/** A saved credential, without its secret values. */
+export interface Credential {
+  id: string
+  name: string
+  kind: CredentialKind
+  url: string
+  fields: CredentialField[]
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * A credential to save. On an update, a secret field with a null value and null notes
+ * keep what was saved before, so the secrets don't have to be opened to edit the rest.
+ */
+export interface CredentialInput {
+  name: string
+  kind: CredentialKind
+  url: string
+  notes: string | null
+  fields: CredentialField[]
+}
+
+/** A credential's secret values, by field name, and its notes. */
+export interface CredentialSecrets {
+  fields: Record<string, string>
+  notes: string
+}
+
+/**
+ * Where the key that encrypts credentials comes from: the server's CREDENTIALS_KEY setting,
+ * or (without one) a key the server generated and keeps in the database.
+ */
+export type VaultKeySource = 'env' | 'database'
+
 /** Everything the app needs from the backend. The app's own server in production, in memory in tests. */
 export interface CloudApi {
   getUser(): Promise<CloudUser | null>
@@ -86,6 +147,18 @@ export interface CloudApi {
   listConnectedApps(): Promise<ConnectedApp[]>
   /** Its access stops right away. */
   disconnectApp(appId: string): Promise<void>
+
+  listContacts(): Promise<Contact[]>
+  createContact(contact: ContactInput): Promise<Contact>
+  updateContact(contactId: string, contact: ContactInput): Promise<Contact>
+  deleteContact(contactId: string): Promise<void>
+
+  listCredentials(): Promise<{ credentials: Credential[]; keySource: VaultKeySource }>
+  createCredential(credential: CredentialInput): Promise<Credential>
+  updateCredential(credentialId: string, credential: CredentialInput): Promise<Credential>
+  /** The secret values, decrypted. Only with a signed-in session, never with an API key. */
+  revealCredential(credentialId: string): Promise<CredentialSecrets>
+  deleteCredential(credentialId: string): Promise<void>
 
   /**
    * Listen for changes made elsewhere: `onBoard` when a board's content changes,

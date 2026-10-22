@@ -404,4 +404,97 @@ describe('accounts and sharing', () => {
     expect(await within(dialog).findByText(/No apps connected/)).toBeInTheDocument()
     expect(server.connectedApps).toEqual([])
   })
+  it('adds, finds, edits and deletes a contact', async () => {
+    const user = userEvent.setup()
+    const server = new MemoryServer()
+    renderWithCloud(server.client(server.addUser('ana@example.com')))
+    await user.click(await screen.findByRole('button', { name: 'Account: ana@example.com' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Contacts…' }))
+    let dialog = screen.getByRole('dialog', { name: 'Contacts' })
+    expect(await within(dialog).findByText(/No contacts yet/)).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: '+ Add contact' }))
+    dialog = screen.getByRole('dialog', { name: 'New contact' })
+    await user.type(within(dialog).getByLabelText('Name'), 'Alex Kim')
+    await user.type(within(dialog).getByLabelText('Company'), 'Acme')
+    await user.type(within(dialog).getByLabelText('Email'), 'alex@acme.test')
+    await user.type(within(dialog).getByLabelText('Phone'), '+66 81 234 5678')
+    await user.click(within(dialog).getByRole('button', { name: 'Add contact' }))
+
+    dialog = await screen.findByRole('dialog', { name: 'Contacts' })
+    expect(await within(dialog).findByText('Alex Kim')).toBeInTheDocument()
+    expect(within(dialog).getByRole('link', { name: 'alex@acme.test' })).toHaveAttribute('href', 'mailto:alex@acme.test')
+    expect(within(dialog).getByRole('link', { name: '+66 81 234 5678' })).toHaveAttribute('href', 'tel:+66812345678')
+
+    await user.type(within(dialog).getByLabelText('Search contacts'), 'nobody')
+    expect(within(dialog).getByText(/No contacts match/)).toBeInTheDocument()
+    await user.clear(within(dialog).getByLabelText('Search contacts'))
+
+    await user.click(within(dialog).getByRole('button', { name: 'Edit Alex Kim' }))
+    dialog = screen.getByRole('dialog', { name: 'Edit contact' })
+    await user.type(within(dialog).getByLabelText('Job title'), 'Buyer')
+    await user.click(within(dialog).getByRole('button', { name: 'Save contact' }))
+    dialog = await screen.findByRole('dialog', { name: 'Contacts' })
+    expect(await within(dialog).findByText('Buyer · Acme')).toBeInTheDocument()
+
+    const confirm = window.confirm
+    window.confirm = () => true
+    try {
+      await user.click(within(dialog).getByRole('button', { name: 'Delete Alex Kim' }))
+    } finally {
+      window.confirm = confirm
+    }
+    expect(await within(dialog).findByText(/No contacts yet/)).toBeInTheDocument()
+    expect(server.contacts).toEqual([])
+  })
+
+  it('saves a credential with masked secrets, shows them on request, and edits it', async () => {
+    const user = userEvent.setup()
+    const server = new MemoryServer()
+    renderWithCloud(server.client(server.addUser('ana@example.com')))
+    await user.click(await screen.findByRole('button', { name: 'Account: ana@example.com' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Credentials…' }))
+    let dialog = screen.getByRole('dialog', { name: 'Credentials' })
+    expect(await within(dialog).findByText('No credentials yet.')).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: '+ Add credential' }))
+    dialog = screen.getByRole('dialog', { name: 'New credential' })
+    await user.type(within(dialog).getByLabelText('Name'), 'Payments API')
+    await user.selectOptions(within(dialog).getByLabelText('Type'), 'API key')
+    await user.type(within(dialog).getByLabelText('Header name'), 'X-API-Key')
+    expect(within(dialog).getByLabelText('API key')).toHaveAttribute('type', 'password')
+    await user.type(within(dialog).getByLabelText('API key'), 'sk_live_123')
+    await user.click(within(dialog).getByRole('button', { name: '+ Add field' }))
+    await user.type(within(dialog).getByLabelText('Field name'), 'Webhook secret')
+    await user.type(within(dialog).getAllByLabelText('Webhook secret').at(-1)!, 'whsec_9')
+    await user.type(within(dialog).getByLabelText('Notes (encrypted)'), 'Rotate yearly')
+    await user.click(within(dialog).getByRole('button', { name: 'Add credential' }))
+
+    dialog = await screen.findByRole('dialog', { name: 'Credentials' })
+    expect(await within(dialog).findByText('Payments API')).toBeInTheDocument()
+    expect(within(dialog).getByText('X-API-Key')).toBeInTheDocument()
+    expect(within(dialog).queryByText('sk_live_123')).not.toBeInTheDocument()
+    expect(within(dialog).getAllByText('••••••••')).toHaveLength(2)
+    expect(server.credentials[0].fields.find((f) => f.name === 'API key')!.value).toBeNull()
+    expect(server.credentials[0].secrets).toEqual({
+      fields: { 'API key': 'sk_live_123', 'Webhook secret': 'whsec_9' },
+      notes: 'Rotate yearly',
+    })
+
+    await user.click(within(dialog).getByRole('button', { name: 'Show secrets of Payments API' }))
+    expect(await within(dialog).findByText('sk_live_123')).toBeInTheDocument()
+    expect(within(dialog).getByText('Rotate yearly')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Hide secrets of Payments API' }))
+    expect(within(dialog).queryByText('sk_live_123')).not.toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Edit Payments API' }))
+    dialog = await screen.findByRole('dialog', { name: 'Edit credential' })
+    expect(within(dialog).getByLabelText('API key')).toHaveValue('sk_live_123')
+    await user.clear(within(dialog).getByLabelText('API key'))
+    await user.type(within(dialog).getByLabelText('API key'), 'sk_live_456')
+    await user.click(within(dialog).getByRole('button', { name: 'Save credential' }))
+    await screen.findByRole('dialog', { name: 'Credentials' })
+    expect(server.credentials[0].secrets.fields['API key']).toBe('sk_live_456')
+    expect(server.credentials[0].secrets.fields['Webhook secret']).toBe('whsec_9')
+  })
 })

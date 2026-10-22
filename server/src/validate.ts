@@ -1,5 +1,7 @@
 import type { BoardOps, BoardRow, CardRow, ColumnRow } from '../../src/cloud/doc.ts'
 import type { ProgressEntry } from '../../src/types.ts'
+import type { ContactInput, CredentialField, CredentialInput } from '../../src/cloud/api.ts'
+import { credentialKinds, type CredentialKind } from '../../src/lib/credentials.ts'
 
 /** Thrown for a request body that doesn't have the expected shape; becomes a 400. */
 export class BadRequest extends Error {}
@@ -364,4 +366,51 @@ export function oauthClientRegistration(value: unknown): OAuthClientRegistration
     throw new BadClientMetadata('invalid_client_metadata', 'Unsupported token_endpoint_auth_method')
   const name = typeof r.client_name === 'string' ? r.client_name.trim().slice(0, 100) : ''
   return { name: name || 'An app', redirectUris: uris.map(redirectUri), authMethod: method }
+}
+
+// --- Contacts and credentials (server/src/people.ts) ---
+
+const plain = (value: unknown, what: string, max: number) => (value === undefined ? '' : str(value, what, max).trim())
+
+export function contactInput(value: unknown): ContactInput {
+  const c = obj(value, 'contact')
+  return {
+    name: title(c.name, 'name', 200),
+    company: plain(c.company, 'company', 200),
+    jobTitle: plain(c.jobTitle, 'jobTitle', 200),
+    email: plain(c.email, 'email', 320),
+    phone: plain(c.phone, 'phone', 100),
+    website: plain(c.website, 'website', 2000),
+    address: plain(c.address, 'address', 1000),
+    notes: plain(c.notes, 'notes', 10_000),
+  }
+}
+
+const MAX_SECRET = 20_000
+
+/** On an update, null secret values and null notes mean "keep what is saved". */
+export function credentialInput(value: unknown, isNew: boolean): CredentialInput {
+  const c = obj(value, 'credential')
+  const kind = c.kind as CredentialKind
+  if (!credentialKinds.includes(kind)) throw new BadRequest(`kind must be one of ${credentialKinds.join(', ')}`)
+  const seen = new Set<string>()
+  const fields = arr(c.fields ?? [], 'fields', 50).map((item): CredentialField => {
+    const f = obj(item, 'field')
+    const name = title(f.name, 'field name', 100)
+    if (seen.has(name.toLowerCase())) throw new BadRequest(`Two fields are named “${name}”`)
+    seen.add(name.toLowerCase())
+    const secret = f.secret === true
+    const multiline = f.multiline === true
+    if (f.value === null || f.value === undefined) {
+      if (!secret || isNew) throw new BadRequest(`Give a value for “${name}”`)
+      return { name, value: null, secret, multiline }
+    }
+    return { name, value: str(f.value, name, MAX_SECRET), secret, multiline }
+  })
+  let notes: string | null
+  if (c.notes === null) {
+    if (isNew) throw new BadRequest('notes must be text')
+    notes = null
+  } else notes = plain(c.notes, 'notes', MAX_SECRET)
+  return { name: title(c.name, 'name', 200), kind, url: plain(c.url, 'url', 2000), notes, fields }
 }

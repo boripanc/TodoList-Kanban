@@ -1,4 +1,16 @@
-import type { ApiKey, CloudApi, ConnectedApp, CloudUser, Member, ReceivedInvite, SentInvite } from './api'
+import type {
+  ApiKey,
+  CloudApi,
+  ConnectedApp,
+  CloudUser,
+  Contact,
+  Credential,
+  CredentialSecrets,
+  Member,
+  ReceivedInvite,
+  SentInvite,
+  VaultKeySource,
+} from './api'
 import { boardRow, cardRows, columnRows, docFromRows, type BoardRow, type CardRow, type ColumnRow } from './doc'
 
 /** No answer from the server yet: it may still be starting. */
@@ -137,6 +149,22 @@ export function createServerApi(base: string): CloudApi {
     listConnectedApps: () => call<ConnectedApp[]>('GET', '/connected-apps'),
     async disconnectApp(appId) {
       await call('DELETE', `/connected-apps/${enc(appId)}`)
+    },
+
+    listContacts: () => call<Contact[]>('GET', '/contacts'),
+    createContact: (contact) => call<Contact>('POST', '/contacts', contact),
+    updateContact: (contactId, contact) => call<Contact>('PUT', `/contacts/${enc(contactId)}`, contact),
+    async deleteContact(contactId) {
+      await call('DELETE', `/contacts/${enc(contactId)}`)
+    },
+
+    listCredentials: () => call<{ credentials: Credential[]; keySource: VaultKeySource }>('GET', '/credentials'),
+    createCredential: (credential) => call<Credential>('POST', '/credentials', credential),
+    updateCredential: (credentialId, credential) =>
+      call<Credential>('PUT', `/credentials/${enc(credentialId)}`, credential),
+    revealCredential: (credentialId) => call<CredentialSecrets>('GET', `/credentials/${enc(credentialId)}/secret`),
+    async deleteCredential(credentialId) {
+      await call('DELETE', `/credentials/${enc(credentialId)}`)
     },
 
     subscribe(_userId, { onBoard, onMembership }) {
