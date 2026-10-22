@@ -11,8 +11,10 @@ import type { EventHub } from './events.ts'
 import { handleMcp } from './mcp.ts'
 import * as oauth from './oauth.ts'
 import { openApiSpec } from './openapi.ts'
+import { peopleRoutes } from './people.ts'
 import { restApi } from './rest.ts'
 import * as v from './validate.ts'
+import { Vault } from './vault.ts'
 
 type Env = { Variables: { user: User; viaApiKey: boolean } }
 
@@ -26,6 +28,8 @@ export interface AppOptions {
   secureCookies?: boolean
   /** The site's public address, e.g. https://workstream.example.com, for OAuth. Defaults to the request's. */
   publicUrl?: string
+  /** Encrypts saved credentials. Without it, the server generates a key and keeps it in the database. */
+  credentialsKey?: string
 }
 
 /** Simple in-memory limit on failed sign-ins per email, to slow down password guessing. */
@@ -49,7 +53,7 @@ function createSignInLimiter(maxFailures = 10, windowMs = 15 * 60 * 1000) {
   }
 }
 
-export function createApp({ db, events, secureCookies = false, publicUrl }: AppOptions) {
+export function createApp({ db, events, secureCookies = false, publicUrl, credentialsKey }: AppOptions) {
   const app = new Hono<Env>().basePath('/api')
   const limiter = createSignInLimiter()
 
@@ -283,6 +287,10 @@ export function createApp({ db, events, secureCookies = false, publicUrl }: AppO
     ])
     return c.json({ ok: true })
   })
+
+  // --- Contacts and credentials (each user's own) ---
+
+  app.route('/', peopleRoutes(db, new Vault(db, credentialsKey)))
 
   // --- REST API and MCP for automation (n8n, AI agents) ---
 

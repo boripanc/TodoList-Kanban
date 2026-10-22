@@ -23,6 +23,12 @@ if (!databaseUrl) {
 }
 const port = Number(process.env.PORT ?? 8787)
 
+const credentialsKey = process.env.CREDENTIALS_KEY
+if (!credentialsKey?.trim())
+  console.warn(
+    'CREDENTIALS_KEY is not set: saved credentials are encrypted with a key kept in the database. Set CREDENTIALS_KEY (e.g. `openssl rand -base64 32`) to keep the key apart from the data.',
+  )
+
 const db = createPgDb(databaseUrl)
 await migrate(db, console.log)
 const events = new EventHub(db)
@@ -31,7 +37,7 @@ await events.start()
 const server = new Hono()
 server.route(
   '/',
-  createApp({ db, events, secureCookies: process.env.COOKIE_SECURE === 'true', publicUrl: process.env.PUBLIC_URL }),
+  createApp({ db, events, secureCookies: process.env.COOKIE_SECURE === 'true', publicUrl: process.env.PUBLIC_URL, credentialsKey }),
 )
 
 const dist = join(root, 'dist')

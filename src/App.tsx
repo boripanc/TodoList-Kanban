@@ -13,6 +13,8 @@ import { LabelManager } from './components/LabelEditor'
 import { Menu } from './components/Menu'
 import { Modal } from './components/Modal'
 import { ApiKeysDialog } from './components/ApiKeys'
+import { ContactsDialog } from './components/Contacts'
+import { CredentialsDialog } from './components/Credentials'
 import { InvitesDialog, ShareDialog } from './components/Sharing'
 import { roleName } from './cloud/api'
 import { useCloud } from './cloud/context'
@@ -27,7 +29,7 @@ export default function App() {
   const [showFilters, setShowFilters] = useState(false)
   const [openCardId, setOpenCardId] = useState<string | null>(null)
   const [dialog, setDialog] = useState<
-    'new-board' | 'labels' | 'shortcuts' | 'share' | 'invites' | 'api-keys' | null
+    'new-board' | 'labels' | 'shortcuts' | 'share' | 'invites' | 'api-keys' | 'contacts' | 'credentials' | null
   >(null)
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -150,6 +152,8 @@ export default function App() {
                   label: `Invitations${cloud.invites.length ? ` (${cloud.invites.length})` : ''}`,
                   onSelect: () => setDialog('invites'),
                 },
+                { label: 'Contacts…', onSelect: () => setDialog('contacts') },
+                { label: 'Credentials…', onSelect: () => setDialog('credentials') },
                 { label: 'API keys…', onSelect: () => setDialog('api-keys') },
                 {
                   label: `Sign out ${cloud.user.email}`,
@@ -314,6 +318,8 @@ export default function App() {
       )}
       {cloud && dialog === 'invites' && <InvitesDialog cloud={cloud} onClose={() => setDialog(null)} />}
       {cloud && dialog === 'api-keys' && <ApiKeysDialog cloud={cloud} onClose={() => setDialog(null)} />}
+      {cloud && dialog === 'contacts' && <ContactsDialog cloud={cloud} onClose={() => setDialog(null)} />}
+      {cloud && dialog === 'credentials' && <CredentialsDialog cloud={cloud} onClose={() => setDialog(null)} />}
       {cloud?.error && (
         <div className="toast" role="alert">
           <span>{cloud.error}</span>

@@ -981,6 +981,112 @@ fieldset.card-editor:disabled .card-editor-title {
   font-size: 0.8rem;
 }
 
+/* Contacts and credentials */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  column-gap: 12px;
+}
+.mono {
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+.pre {
+  white-space: pre-wrap;
+}
+textarea.masked {
+  -webkit-text-security: disc;
+}
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.vault-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vault-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+.vault-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.vault-fields {
+  margin: 6px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.vault-fields:empty {
+  display: none;
+}
+.vault-field {
+  display: grid;
+  grid-template-columns: minmax(90px, 160px) 1fr auto;
+  align-items: start;
+  gap: 8px;
+}
+.vault-field dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding-top: 2px;
+}
+.vault-field dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding-top: 2px;
+}
+.vault-field > dd:last-child {
+  grid-column: 2 / 4;
+}
+.vault-field .button.small {
+  padding: 2px 8px;
+}
+.vault-field-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 180px) 1fr auto;
+  align-items: start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.vault-field-label {
+  padding-top: 7px;
+  overflow-wrap: anywhere;
+}
+.vault-field-name {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vault-field-row > input,
+.vault-field-row > textarea {
+  width: 100%;
+}
+@media (max-width: 640px) {
+  .vault-field,
+  .vault-field-row {
+    grid-template-columns: 1fr auto;
+  }
+  .vault-field dt,
+  .vault-field-label,
+  .vault-field-name {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 640px) {
   .topbar {
     padding: 8px 12px;

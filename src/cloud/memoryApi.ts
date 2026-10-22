@@ -1,5 +1,16 @@
 import type { Role } from '../types'
-import type { ApiKey, CloudApi, ConnectedApp, CloudUser, SentInvite } from './api'
+import type {
+  ApiKey,
+  CloudApi,
+  ConnectedApp,
+  CloudUser,
+  Contact,
+  ContactInput,
+  Credential,
+  CredentialInput,
+  CredentialSecrets,
+  SentInvite,
+} from './api'
 import { boardRow, cardRows, columnRows, docFromRows, type BoardRow, type CardRow, type ColumnRow } from './doc'
 
 interface Invite extends SentInvite {
@@ -20,6 +31,9 @@ export class MemoryServer {
   invites: Invite[] = []
   apiKeys: (ApiKey & { userId: string; key: string })[] = []
   connectedApps: (ConnectedApp & { userId: string })[] = []
+  contacts: (Contact & { userId: string })[] = []
+  /** Secrets are kept in `secrets` here; the real server encrypts them. */
+  credentials: (Credential & { userId: string; secrets: CredentialSecrets })[] = []
   private listeners = new Set<{ userId: string; onBoard: (id: string) => void; onMembership: () => void }>()
   private clock = 0
   private nextId = 1
@@ -282,9 +296,111 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
       server.apiKeys = server.apiKeys.filter((k) => !(k.id === keyId && k.userId === userId))
     },
 
+    async listContacts() {
+      const userId = me().id
+      return server.contacts
+        .filter((c) => c.userId === userId)
+        .map(withoutOwner)
+        .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+    },
+    async createContact(input) {
+      const now = new Date().toISOString()
+      const contact: Contact = { ...checkContact(input), id: server.token(), createdAt: now, updatedAt: now }
+      server.contacts.push({ ...contact, userId: me().id })
+      return contact
+    },
+    async updateContact(contactId, input) {
+      const row = server.contacts.find((c) => c.id === contactId && c.userId === me().id)
+      if (!row) throw new Error('Contact not found')
+      Object.assign(row, checkContact(input), { updatedAt: new Date().toISOString() })
+      return withoutOwner(row)
+    },
+    async deleteContact(contactId) {
+      const userId = me().id
+      const before = server.contacts.length
+      server.contacts = server.contacts.filter((c) => !(c.id === contactId && c.userId === userId))
+      if (server.contacts.length === before) throw new Error('Contact not found')
+    },
+
+    async listCredentials() {
+      const userId = me().id
+      const credentials = server.credentials
+        .filter((c) => c.userId === userId)
+        .map(publicCredential)
+        .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+      return { credentials, keySource: 'env' as const }
+    },
+    async createCredential(input) {
+      const now = new Date().toISOString()
+      const { fields, secrets } = splitCredential(input, { fields: {}, notes: '' }, true)
+      const row = { name: input.name.trim(), kind: input.kind, url: input.url.trim(), fields, secrets }
+      const saved = { ...row, id: server.token(), createdAt: now, updatedAt: now, userId: me().id }
+      server.credentials.push(saved)
+      return publicCredential(saved)
+    },
+    async updateCredential(credentialId, input) {
+      const row = server.credentials.find((c) => c.id === credentialId && c.userId === me().id)
+      if (!row) throw new Error('Credential not found')
+      const { fields, secrets } = splitCredential(input, row.secrets, false)
+      Object.assign(row, {
+        name: input.name.trim(),
+        kind: input.kind,
+        url: input.url.trim(),
+        fields,
+        secrets,
+        updatedAt: new Date().toISOString(),
+      })
+      return publicCredential(row)
+    },
+    async revealCredential(credentialId) {
+      const row = server.credentials.find((c) => c.id === credentialId && c.userId === me().id)
+      if (!row) throw new Error('Credential not found')
+      return structuredClone(row.secrets)
+    },
+    async deleteCredential(credentialId) {
+      const userId = me().id
+      const before = server.credentials.length
+      server.credentials = server.credentials.filter((c) => !(c.id === credentialId && c.userId === userId))
+      if (server.credentials.length === before) throw new Error('Credential not found')
+    },
+
     subscribe(userId, handlers) {
       return server.listen({ userId, ...handlers })
     },
   }
   return api
+}
+
+function withoutOwner<T extends { userId: string }>(row: T): Omit<T, 'userId'> {
+  const { userId: _userId, ...rest } = row
+  return rest
+}
+
+function checkContact(input: ContactInput): ContactInput {
+  if (!input.name.trim()) throw new Error('name is required')
+  const trimmed = Object.fromEntries(Object.entries(input).map(([k, v]) => [k, v.trim()]))
+  return trimmed as unknown as ContactInput
+}
+
+function publicCredential(row: Credential & { userId: string; secrets: CredentialSecrets }): Credential {
+  const { userId: _userId, secrets: _secrets, ...rest } = row
+  return structuredClone(rest)
+}
+
+/** Like the server: secret values go to `secrets`, and on an update null keeps the saved value. */
+function splitCredential(input: CredentialInput, previous: CredentialSecrets, isNew: boolean) {
+  if (!input.name.trim()) throw new Error('name is required')
+  const names = new Set<string>()
+  const secrets: CredentialSecrets = { fields: {}, notes: input.notes ?? previous.notes }
+  const fields = input.fields.map((f) => {
+    const name = f.name.trim()
+    if (!name) throw new Error('field name is required')
+    if (names.has(name.toLowerCase())) throw new Error(`Two fields are named “${name}”`)
+    names.add(name.toLowerCase())
+    if (f.value === null && (!f.secret || isNew)) throw new Error(`Give a value for “${name}”`)
+    if (!f.secret) return { ...f, name }
+    secrets.fields[name] = f.value ?? previous.fields[name] ?? ''
+    return { ...f, name, value: null }
+  })
+  return { fields, secrets }
 }

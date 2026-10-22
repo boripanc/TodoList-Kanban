@@ -13,6 +13,7 @@ A kanban board for work and daily life. It works in the browser with no account,
 - **Backup**: export all boards to JSON and import them again.
 - **Light and dark themes**, following the system by default.
 - **Accounts and sharing** (optional, with your own Postgres): sign in with an email and password, keep boards in your account on every device, invite people by email or with a link as editors or viewers, accept or decline invitations, change roles, remove people or leave a board. Shared boards update live.
+- **Contacts and credentials** (with accounts): a personal address book, and a vault for logins, API keys, bearer tokens, OAuth clients, SSH keys, certificates, database and cloud keys, two-factor secrets or any custom fields. Secret values are encrypted on the server and masked in the app.
 - **Automation** (with accounts): API keys, a REST API and an MCP server, so n8n, scripts and AI agents can manage boards. Claude connects with a sign-in, no key needed.
 - **Keyboard shortcuts**: `/` search, `N` new card, `F` filters, `Enter` open card, `Space` pick up and drop, `?` list them all.
 
@@ -41,7 +42,7 @@ Accounts need the server running where you host the app; a static site host serv
 
 1. Set the build pack to **Dockerfile** (not Nixpacks static, and not "Is it a static site?").
 2. Set **Ports Exposes** to `8787`.
-3. Add the environment variables `DATABASE_URL` (a Postgres the Coolify server can reach) and `COOKIE_SECURE=true`.
+3. Add the environment variables `DATABASE_URL` (a Postgres the Coolify server can reach), `COOKIE_SECURE=true` and `CREDENTIALS_KEY` (see Settings).
 4. Deploy. Opening `https://your-domain/api/auth/me` should show `{"user":null}`; if it shows the app's page, the server isn't running.
 
 How it works:
@@ -51,6 +52,7 @@ How it works:
 - **Invites by email**: the person sees the invitation once they sign in with that address, and can accept or decline. The app does not send an email for it, so let them know.
 - **Invite links**: anyone with the link can join with the link's role after signing in, until the owner turns the link off.
 - **Device boards**: boards made before accounts were turned on stay on the device and show up after signing in, under "On this device". Use **Share board…** and **Move to my account** to upload one. Signing out returns to the sign-in page and removes account boards from the device; they come back on sign-in.
+- **Contacts and credentials**: in the account menu. Both are private to each account. Credential secrets and notes are encrypted with AES-256-GCM before they reach the database; lists show them masked, and **Show**, **Copy** or **Edit** fetch them on request. Credentials open only in the app with a signed-in session, never with an API key or through MCP. Contacts also work with an API key at `/api/contacts`.
 - **Live updates**: Postgres `LISTEN`/`NOTIFY` feeds a stream of events to each browser, so changes appear for other members within a moment. Edits to different cards merge; if two people change the same card at once, the last save wins.
 
 ### Settings
@@ -61,6 +63,7 @@ How it works:
 | `PORT` | Port for the server (default 8787). |
 | `COOKIE_SECURE` | Set to `true` when serving over https, so the session cookie is https-only. |
 | `PUBLIC_URL` | The site's public address, e.g. `https://workstream.teddybiere.info`, used in OAuth discovery for Claude. Optional: by default it comes from the request and proxy headers. |
+| `CREDENTIALS_KEY` | Encrypts saved credentials. Use a long random value, e.g. from `openssl rand -base64 32`, and keep a copy: credentials saved with it can't be opened without it. Without it, the server generates a key and keeps it in the database (secrets are still not stored as plain text, but the key sits next to them). Credentials saved before you set it stay readable. |
 | `VITE_API_URL` | Where the app looks for the API (default `/api`). Set it only when the server runs on another address; `off` turns accounts off. |
 
 Behind a reverse proxy, forward `/api` to the server and keep the app on the same origin, so the session cookie is sent.

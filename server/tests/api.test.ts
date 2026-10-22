@@ -44,7 +44,7 @@ afterAll(() => db.close())
 
 beforeEach(async () => {
   await pg.exec(
-    'truncate kanban.users, kanban.sessions, kanban.boards, kanban.board_members, kanban.columns, kanban.cards, kanban.board_invites, kanban.oauth_clients cascade',
+    'truncate kanban.users, kanban.sessions, kanban.boards, kanban.board_members, kanban.columns, kanban.cards, kanban.board_invites, kanban.oauth_clients, kanban.contacts, kanban.credentials cascade',
   )
   events = new EventHub(db)
   app = createApp({ db, events })
@@ -999,5 +999,194 @@ describe('OAuth for MCP clients', () => {
     const res = await visit('/api/oauth/authorize', form({ ...fieldsOf(html), decision: 'allow' }))
     expect(new URL(res.headers.get('location')!).searchParams.get('code')).toBeTruthy()
     expect(ana.user.email).toBe('ana@example.com')
+  })
+})
+
+describe('contacts', () => {
+  const alex = {
+    name: 'Alex Kim',
+    company: 'Acme',
+    jobTitle: 'Buyer',
+    email: 'alex@acme.test',
+    phone: '+66 81 234 5678',
+    website: 'https://acme.test',
+    address: 'Bangkok',
+    notes: 'Prefers calls',
+  }
+
+  it('adds, lists, edits and deletes the caller’s own contacts', async () => {
+    const ana = await signUp('ana@example.com')
+    const created = await ana.call('POST', '/contacts', alex)
+    expect(created.status).toBe(201)
+    expect(created.data).toMatchObject({ ...alex, id: expect.any(String) })
+    await ana.call('POST', '/contacts', { name: 'bea' })
+
+    const list = await ana.call('GET', '/contacts')
+    expect(list.data.map((c: { name: string }) => c.name)).toEqual(['Alex Kim', 'bea'])
+    expect(list.data[1]).toMatchObject({ company: '', email: '' })
+
+    const edited = await ana.call('PUT', `/contacts/${created.data.id}`, { ...alex, phone: '02 000 0000' })
+    expect(edited.status).toBe(200)
+    expect(edited.data.phone).toBe('02 000 0000')
+
+    expect((await ana.call('DELETE', `/contacts/${created.data.id}`)).status).toBe(200)
+    expect((await ana.call('GET', '/contacts')).data).toHaveLength(1)
+  })
+
+  it('refuses a contact without a name, and anyone without an account', async () => {
+    const ana = await signUp('ana@example.com')
+    expect((await ana.call('POST', '/contacts', { name: '  ' })).status).toBe(400)
+    expect((await ana.call('POST', '/contacts', { name: 'x', email: 5 })).status).toBe(400)
+    const res = await app.request('/api/contacts')
+    expect(res.status).toBe(401)
+  })
+
+  it('keeps one user’s contacts from another', async () => {
+    const ana = await signUp('ana@example.com')
+    const ben = await signUp('ben@example.com')
+    const { data } = await ana.call('POST', '/contacts', alex)
+    expect((await ben.call('GET', '/contacts')).data).toEqual([])
+    expect((await ben.call('PUT', `/contacts/${data.id}`, { name: 'Mine now' })).status).toBe(404)
+    expect((await ben.call('DELETE', `/contacts/${data.id}`)).status).toBe(404)
+    expect((await ben.call('DELETE', '/contacts/not-a-uuid')).status).toBe(404)
+    expect((await ana.call('GET', '/contacts')).data[0].name).toBe('Alex Kim')
+  })
+
+  it('works with an API key too', async () => {
+    const ana = await signUp('ana@example.com')
+    const n8n = await apiKeyFor(ana)
+    expect((await n8n.call('POST', '/contacts', { name: 'From n8n' })).status).toBe(201)
+    expect((await ana.call('GET', '/contacts')).data[0].name).toBe('From n8n')
+  })
+})
+
+describe('credentials', () => {
+  const login = {
+    name: 'Bank',
+    kind: 'login',
+    url: 'https://bank.test',
+    notes: 'PIN is 1234',
+    fields: [
+      { name: 'Username', value: 'ana', secret: false, multiline: false },
+      { name: 'Password', value: 'hunter2', secret: true, multiline: false },
+    ],
+  }
+
+  it('stores secrets encrypted and returns them only when asked', async () => {
+    const ana = await signUp('ana@example.com')
+    const created = await ana.call('POST', '/credentials', login)
+    expect(created.status).toBe(201)
+    expect(created.data.fields).toEqual([
+      { name: 'Username', value: 'ana', secret: false, multiline: false },
+      { name: 'Password', value: null, secret: true, multiline: false },
+    ])
+    expect(JSON.stringify(created.data)).not.toContain('hunter2')
+
+    const list = await ana.call('GET', '/credentials')
+    expect(list.data.keySource).toBe('database')
+    expect(list.data.credentials).toHaveLength(1)
+    expect(JSON.stringify(list.data)).not.toMatch(/hunter2|PIN/)
+
+    // Nothing readable in the database.
+    const { rows } = await db.query<{ fields: unknown; secret: string }>('select fields, secret from kanban.credentials')
+    expect(JSON.stringify(rows)).not.toMatch(/hunter2|PIN/)
+    expect(rows[0].secret).toMatch(/^v1\.db\./)
+
+    const secret = await ana.call('GET', `/credentials/${created.data.id}/secret`)
+    expect(secret.data).toEqual({ fields: { Password: 'hunter2' }, notes: 'PIN is 1234' })
+  })
+
+  it('keeps saved secrets when an edit leaves them out, and replaces them when given', async () => {
+    const ana = await signUp('ana@example.com')
+    const { data } = await ana.call('POST', '/credentials', login)
+    const keep = {
+      ...login,
+      name: 'My bank',
+      notes: null,
+      fields: [
+        { name: 'Username', value: 'ana2', secret: false, multiline: false },
+        { name: 'Password', value: null, secret: true, multiline: false },
+        { name: 'Recovery code', value: 'abc', secret: true, multiline: false },
+      ],
+    }
+    expect((await ana.call('PUT', `/credentials/${data.id}`, keep)).data.name).toBe('My bank')
+    expect((await ana.call('GET', `/credentials/${data.id}/secret`)).data).toEqual({
+      fields: { Password: 'hunter2', 'Recovery code': 'abc' },
+      notes: 'PIN is 1234',
+    })
+
+    await ana.call('PUT', `/credentials/${data.id}`, { ...login, fields: [login.fields[1]], notes: '' })
+    expect((await ana.call('GET', `/credentials/${data.id}/secret`)).data).toEqual({
+      fields: { Password: 'hunter2' },
+      notes: '',
+    })
+  })
+
+  it('accepts every kind of credential and refuses bad input', async () => {
+    const ana = await signUp('ana@example.com')
+    for (const kind of ['api_key', 'bearer', 'oauth2', 'ssh', 'certificate', 'database', 'cloud', 'totp', 'other']) {
+      const res = await ana.call('POST', '/credentials', { ...login, kind })
+      expect(res.status).toBe(201)
+    }
+    expect((await ana.call('POST', '/credentials', { ...login, kind: 'magic' })).status).toBe(400)
+    expect((await ana.call('POST', '/credentials', { ...login, name: '' })).status).toBe(400)
+    const twice = { ...login, fields: [login.fields[0], { ...login.fields[0], name: 'username' }] }
+    expect((await ana.call('POST', '/credentials', twice)).status).toBe(400)
+    // A new credential has no saved value to keep.
+    const missing = { ...login, fields: [{ ...login.fields[1], value: null }] }
+    expect((await ana.call('POST', '/credentials', missing)).status).toBe(400)
+  })
+
+  it('keeps one user’s credentials from another', async () => {
+    const ana = await signUp('ana@example.com')
+    const ben = await signUp('ben@example.com')
+    const { data } = await ana.call('POST', '/credentials', login)
+    expect((await ben.call('GET', '/credentials')).data.credentials).toEqual([])
+    expect((await ben.call('GET', `/credentials/${data.id}/secret`)).status).toBe(404)
+    expect((await ben.call('PUT', `/credentials/${data.id}`, login)).status).toBe(404)
+    expect((await ben.call('DELETE', `/credentials/${data.id}`)).status).toBe(404)
+    expect((await ana.call('DELETE', `/credentials/${data.id}`)).status).toBe(200)
+    expect((await ana.call('GET', `/credentials/${data.id}/secret`)).status).toBe(404)
+  })
+
+  it('refuses API keys and anyone signed out', async () => {
+    const ana = await signUp('ana@example.com')
+    const { data } = await ana.call('POST', '/credentials', login)
+    const n8n = await apiKeyFor(ana)
+    expect((await n8n.call('GET', '/credentials')).status).toBe(403)
+    expect((await n8n.call('GET', `/credentials/${data.id}/secret`)).status).toBe(403)
+    expect((await n8n.call('POST', '/credentials', login)).status).toBe(403)
+    expect((await n8n.call('DELETE', `/credentials/${data.id}`)).status).toBe(403)
+    expect((await app.request('/api/credentials')).status).toBe(401)
+  })
+
+  it('uses CREDENTIALS_KEY when set, and still opens secrets saved before it', async () => {
+    const ana = await signUp('ana@example.com')
+    const before = (await ana.call('POST', '/credentials', login)).data.id
+
+    app = createApp({ db, events, credentialsKey: 'a long random key' })
+    const after = (await ana.call('POST', '/credentials', login)).data.id
+    expect((await ana.call('GET', '/credentials')).data.keySource).toBe('env')
+    const { rows } = await db.query<{ secret: string }>('select secret from kanban.credentials where id = $1', [after])
+    expect(rows[0].secret).toMatch(/^v1\.k[0-9a-f]{12}\./)
+    expect((await ana.call('GET', `/credentials/${before}/secret`)).data.fields).toEqual({ Password: 'hunter2' })
+    expect((await ana.call('GET', `/credentials/${after}/secret`)).data.fields).toEqual({ Password: 'hunter2' })
+
+    // With a different key, the newer one can't be opened, and the server says why.
+    app = createApp({ db, events, credentialsKey: 'some other key' })
+    const wrong = await ana.call('GET', `/credentials/${after}/secret`)
+    expect(wrong.status).toBe(409)
+    expect(wrong.data.error).toMatch(/different CREDENTIALS_KEY/)
+  })
+
+  it('cannot move an encrypted secret to another row', async () => {
+    const ana = await signUp('ana@example.com')
+    const a = (await ana.call('POST', '/credentials', login)).data.id
+    const b = (await ana.call('POST', '/credentials', { ...login, name: 'Other' })).data.id
+    await db.query(
+      'update kanban.credentials set secret = (select secret from kanban.credentials where id = $1) where id = $2',
+      [a, b],
+    )
+    expect((await ana.call('GET', `/credentials/${b}/secret`)).status).toBe(409)
   })
 })
