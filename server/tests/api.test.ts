@@ -158,7 +158,7 @@ describe('boards', () => {
     const ana = await ownerWithBoard()
     expect((await ana.call('GET', '/boards')).data).toEqual([expect.objectContaining({ id: 'b1', role: 'owner' })])
     const doc = (await ana.call('GET', '/boards/b1')).data
-    expect(doc.board).toEqual(board.board)
+    expect(doc.board).toEqual({ ...board.board, team: [] })
     expect(doc.cards).toEqual([expect.objectContaining({ ...board.cards[0], board_id: 'b1' })])
 
     const res = await ana.call('POST', '/boards/b1/changes', {
@@ -222,6 +222,33 @@ describe('boards', () => {
     const bad = await ana.call('POST', '/boards/b1/changes', { upsertCards: [{ ...card('c1', 'x'), progress: 120 }] })
     expect(bad.status).toBe(400)
     expect(bad.data.error).toMatch(/progress/)
+  })
+
+  it('syncs the team and card assignees, and keeps them when an older app leaves them out', async () => {
+    const ana = await ownerWithBoard()
+    const team = [{ id: 'm1', name: 'Kim', color: '#0090ff', capacity: 2 }]
+    await ana.call('POST', '/boards/b1/changes', {
+      board: { title: 'Trip', labels: board.board.labels, team },
+      upsertCards: [{ ...card('c1', 'Book flights', 'col1', 0), assignee_ids: ['m1'] }],
+    })
+    const stored = () => ana.call('GET', '/boards/b1').then((r) => r.data)
+    expect((await stored()).board.team).toEqual(team)
+    expect((await stored()).cards[0].assignee_ids).toEqual(['m1'])
+
+    // An app from before teams sends neither; both stay.
+    await ana.call('POST', '/boards/b1/changes', {
+      board: { title: 'Trip!', labels: [] },
+      upsertCards: [card('c1', 'Book cheap flights', 'col1', 0)],
+    })
+    const after = await stored()
+    expect(after.board).toMatchObject({ title: 'Trip!', team })
+    expect(after.cards[0]).toMatchObject({ title: 'Book cheap flights', assignee_ids: ['m1'] })
+
+    const bad = await ana.call('POST', '/boards/b1/changes', {
+      board: { title: 'Trip', labels: [], team: [{ ...team[0], capacity: -1 }] },
+    })
+    expect(bad.status).toBe(400)
+    expect(bad.data.error).toMatch(/capacity/)
   })
 
   it('rejects malformed changes', async () => {
@@ -584,6 +611,72 @@ describe('REST API (v1)', () => {
     expect((await stranger.call('GET', '/v1/cards')).data).toEqual([])
   })
 
+  it('assigns cards to the team, manages the team and reports workload', async () => {
+    const ana = await ownerWithBoard()
+    const n8n = await apiKeyFor(ana)
+    // Assigning by a new name adds that person to the team.
+    const assigned = await n8n.call('PATCH', '/v1/cards/c1', { assignees: ['Kim', 'Lee'] })
+    expect(assigned.data.assignees.map((a: { name: string }) => a.name)).toEqual(['Kim', 'Lee'])
+    let b = (await n8n.call('GET', '/v1/boards/b1')).data
+    expect(b.team).toEqual([
+      expect.objectContaining({ name: 'Kim', capacity: 0 }),
+      expect.objectContaining({ name: 'Lee', capacity: 0 }),
+    ])
+    const kim = b.team[0].id
+
+    const set = await n8n.call('PUT', '/v1/boards/b1/team/kim', { capacity: 1, color: '#30a46c' })
+    expect(set.data).toEqual({ id: kim, name: 'Kim', color: '#30a46c', capacity: 1 })
+    expect((await n8n.call('PUT', '/v1/boards/b1/team/Max', { capacity: 3 })).data).toMatchObject({ name: 'Max', capacity: 3 })
+    expect((await n8n.call('PUT', '/v1/boards/b1/team/Max', { name: 'kim' })).status).toBe(409)
+    expect((await n8n.call('PUT', '/v1/boards/b1/team/Max', { capacity: -1 })).status).toBe(400)
+
+    const created = await n8n.call('POST', '/v1/boards/b1/cards', { column: 'To do', title: 'Hotel', assignees: [kim] })
+    expect(created.data.assignees).toEqual([{ id: kim, name: 'Kim' }])
+    await n8n.call('POST', '/v1/boards/b1/cards', { column: 'Done', title: 'Visa', assignees: ['Kim'] })
+    await n8n.call('POST', '/v1/boards/b1/cards', { column: 'To do', title: 'Insurance' })
+
+    expect((await n8n.call('GET', '/v1/cards?assignee=kim')).data.map((c: { title: string }) => c.title)).toEqual([
+      'Book flights',
+      'Hotel',
+      'Visa',
+    ])
+    expect((await n8n.call('GET', '/v1/boards/b1/cards?assignee=none')).data.map((c: { title: string }) => c.title)).toEqual([
+      'Insurance',
+    ])
+
+    const load = (await n8n.call('GET', '/v1/boards/b1/workload')).data
+    expect(load.boards).toEqual([{ id: 'b1', title: 'Trip' }])
+    const byName = Object.fromEntries(load.members.map((m: { name: string }) => [m.name, m]))
+    expect(byName.Kim).toMatchObject({ openCount: 2, doneCount: 1, capacity: 1, level: 'over' })
+    expect(byName.Kim.openCards.map((c: { title: string }) => c.title)).toEqual(['Book flights', 'Hotel'])
+    expect(byName.Max).toMatchObject({ openCount: 0, level: 'free' })
+    expect(load.unassigned.map((c: { title: string }) => c.title)).toEqual(['Insurance'])
+
+    // Across boards, the same name counts as one person.
+    const other = (await n8n.call('POST', '/v1/boards', { title: 'Home' })).data
+    await n8n.call('POST', `/v1/boards/${other.id}/cards`, { column: 'To do', title: 'Paint', assignees: ['kim'] })
+    const all = (await n8n.call('GET', '/v1/workload')).data
+    expect(all.members.find((m: { name: string }) => m.name.toLowerCase() === 'kim')).toMatchObject({
+      openCount: 3,
+      memberIds: [expect.any(String), expect.any(String)],
+    })
+
+    // Removing someone takes them off their cards.
+    expect((await n8n.call('DELETE', '/v1/boards/b1/team/Kim')).status).toBe(200)
+    expect((await n8n.call('GET', '/v1/cards/c1')).data.assignees.map((a: { name: string }) => a.name)).toEqual(['Lee'])
+    expect((await n8n.call('DELETE', '/v1/boards/b1/team/Kim')).status).toBe(404)
+
+    const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
+    expect((await viewer.call('GET', '/v1/boards/b1/workload')).status).toBe(200)
+    expect((await viewer.call('PUT', '/v1/boards/b1/team/Ben', {})).status).toBe(403)
+    expect((await viewer.call('DELETE', '/v1/boards/b1/team/Lee')).status).toBe(403)
+    expect((await viewer.call('PATCH', '/v1/cards/c1', { assignees: [] })).status).toBe(403)
+    const stranger = await apiKeyFor(await signUp('eve@example.com'))
+    expect((await stranger.call('GET', '/v1/boards/b1/workload')).status).toBe(404)
+    expect((await stranger.call('PUT', '/v1/boards/b1/team/Eve', {})).status).toBe(404)
+    expect((await stranger.call('GET', '/v1/workload')).data).toMatchObject({ boards: [], members: [], unassigned: [] })
+  })
+
   it('refuses to move a card into a column on another board', async () => {
     const ana = await ownerWithBoard()
     const n8n = await apiKeyFor(ana)
@@ -653,6 +746,15 @@ describe('MCP endpoint', () => {
     })
     const updated = await rpc(n8n, 'tools/call', { name: 'update_card', arguments: { cardId: card.id, progress: 100 } })
     expect(JSON.parse(updated.data.result.content[0].text)).toMatchObject({ progress: 100 })
+
+    const call = async (name: string, args: object) =>
+      JSON.parse((await rpc(n8n, 'tools/call', { name, arguments: args })).data.result.content[0].text)
+    expect(await call('set_team_member', { boardId: 'b1', member: 'Kim', capacity: 1 })).toMatchObject({ name: 'Kim', capacity: 1 })
+    expect(await call('update_card', { cardId: 'c1', assignees: ['Kim'] })).toMatchObject({ assignees: [{ name: 'Kim' }] })
+    expect(await call('find_cards', { assignee: 'Kim' })).toHaveLength(1)
+    const load = await call('get_workload', { boardId: 'b1' })
+    expect(load.members).toEqual([expect.objectContaining({ name: 'Kim', openCount: 1, level: 'full' })])
+    expect(await call('remove_team_member', { boardId: 'b1', member: 'Kim' })).toEqual({ ok: true })
   })
 
   it('returns refusals and bad input as tool errors, and unknown methods as JSON-RPC errors', async () => {

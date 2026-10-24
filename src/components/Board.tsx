@@ -187,6 +187,7 @@ export function Board({ board, filter, onOpenCard, readOnly = false }: BoardProp
                 filterActive={isFilterActive(filter)}
                 activeCardId={active?.type === 'card' ? active.id : undefined}
                 labels={board.labels}
+                team={board.team}
                 onOpenCard={openCard}
                 readOnly={readOnly}
               />
@@ -233,7 +234,7 @@ export function Board({ board, filter, onOpenCard, readOnly = false }: BoardProp
       </main>
 
       <DragOverlay>
-        {activeCard && <CardView card={activeCard} labels={board.labels} overlay />}
+        {activeCard && <CardView card={activeCard} labels={board.labels} team={board.team} overlay />}
         {activeColumn && (
           <div className="column column-overlay">
             <header className="column-header">

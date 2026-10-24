@@ -1,5 +1,6 @@
 import type { Board, CardFilter, DueFilter, Priority } from '../types'
-import { emptyFilter, isFilterActive } from '../lib/filter'
+import { emptyFilter, isFilterActive, UNASSIGNED } from '../lib/filter'
+import { Avatar } from './Team'
 import { priorityLabel } from '../lib/priority'
 
 const dueOptions: { value: DueFilter; label: string }[] = [
@@ -42,6 +43,29 @@ export function FilterBar({
           </button>
         ))}
       </div>
+      {board.team.length > 0 && (
+        <div className="filter-group">
+          <span className="filter-heading">Assignee</span>
+          {board.team.map((member) => (
+            <button
+              key={member.id}
+              className={`chip chip-person ${filter.assigneeIds.includes(member.id) ? 'on' : ''}`}
+              aria-pressed={filter.assigneeIds.includes(member.id)}
+              onClick={() => onChange({ ...filter, assigneeIds: toggle(filter.assigneeIds, member.id) })}
+            >
+              <Avatar person={member} small />
+              {member.name}
+            </button>
+          ))}
+          <button
+            className={`chip ${filter.assigneeIds.includes(UNASSIGNED) ? 'on' : ''}`}
+            aria-pressed={filter.assigneeIds.includes(UNASSIGNED)}
+            onClick={() => onChange({ ...filter, assigneeIds: toggle(filter.assigneeIds, UNASSIGNED) })}
+          >
+            Unassigned
+          </button>
+        </div>
+      )}
       <div className="filter-group">
         <span className="filter-heading">Priority</span>
         {priorities.map((p) => (

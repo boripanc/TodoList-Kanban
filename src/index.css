@@ -812,6 +812,208 @@ small.due-hint {
   flex: 1 1 120px;
 }
 
+/* Team: avatars, assignees and workload */
+.avatar {
+  --avatar: #8b8d98;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--avatar);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+.avatar-small {
+  width: 20px;
+  height: 20px;
+  font-size: 0.6rem;
+}
+.avatar-more,
+.avatar-empty {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.avatar-stack {
+  display: inline-flex;
+  margin-left: auto;
+  padding-left: 4px;
+}
+.avatar-stack .avatar {
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.avatar-stack .avatar + .avatar {
+  margin-left: -6px;
+}
+.assignee-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.assignee-toggle,
+.chip-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.assignee-toggle {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 2px 10px 2px 2px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.assignee-toggle.on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  font-weight: 600;
+}
+.assignee-toggle.full {
+  border-style: dashed;
+}
+.assignee-full {
+  font-size: 0.7rem;
+  color: var(--warn);
+}
+.chip-person {
+  padding-left: 2px;
+}
+.segmented {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.workload {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.workload-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: var(--surface);
+}
+.workload-row.level-over {
+  border-color: color-mix(in srgb, var(--danger) 60%, var(--border));
+}
+.workload-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.workload-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.workload-level {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.workload-level.level-full {
+  color: var(--warn);
+}
+.workload-level.level-over {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+.meter {
+  height: 6px;
+  margin: 8px 0 4px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.meter-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ok);
+}
+.level-full .meter-bar {
+  background: var(--warn);
+}
+.level-over .meter-bar {
+  background: var(--danger);
+}
+.workload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 0.85rem;
+}
+.workload-unassigned .workload-actions {
+  margin-top: 6px;
+}
+.workload-cards {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 0.9rem;
+}
+.workload-cards li {
+  margin: 2px 0;
+  overflow-wrap: anywhere;
+}
+.team-editor {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.team-editor h3 {
+  margin: 4px 0;
+}
+.team-editor ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.team-editor li,
+.team-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.team-editor li > input,
+.team-add > input:first-child {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.capacity-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.capacity-field input,
+.team-add input[type='number'] {
+  width: 6.5em;
+}
+.team-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
 .template-option {
   display: flex;
   gap: 10px;

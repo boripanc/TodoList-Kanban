@@ -1,15 +1,17 @@
 import { useState } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { Card, Label } from '../types'
+import type { Card, Label, TeamMember } from '../types'
 import { dueStatus, formatDue } from '../lib/dates'
 import { priorityLabel } from '../lib/priority'
 import { isExpanded, setExpanded, type ExpandablePart } from '../lib/expanded'
 import { useStore } from '../state/context'
+import { AvatarStack } from './Team'
 
 interface CardViewProps {
   card: Card
   labels: Label[]
+  team: TeamMember[]
   overlay?: boolean
   /** Show the recent progress updates, not just the latest one. */
   expanded?: boolean
@@ -107,6 +109,7 @@ function CardProgress({ card, expanded, onToggle }: { card: Card; expanded: bool
 export function CardView({
   card,
   labels,
+  team,
   overlay,
   expanded = false,
   onToggleProgress,
@@ -118,6 +121,7 @@ export function CardView({
   const doneCount = card.checklist.filter((item) => item.done).length
   const status = card.dueDate ? dueStatus(card.dueDate) : null
   const checklistDone = card.checklist.length > 0 && doneCount === card.checklist.length
+  const assignees = card.assigneeIds.flatMap((id) => team.find((m) => m.id === id) ?? [])
 
   return (
     <div className={`card ${overlay ? 'card-overlay' : ''} priority-edge-${card.priority}`}>
@@ -131,7 +135,11 @@ export function CardView({
         </div>
       )}
       <div className="card-title">{card.title}</div>
-      {(card.priority !== 'none' || card.dueDate || card.checklist.length > 0 || card.description) && (
+      {(card.priority !== 'none' ||
+        card.dueDate ||
+        card.checklist.length > 0 ||
+        card.description ||
+        assignees.length > 0) && (
         <div className="card-meta">
           {card.priority !== 'none' && (
             <span className={`badge priority-${card.priority}`} title="Priority">
@@ -169,6 +177,7 @@ export function CardView({
               ≡
             </span>
           )}
+          {assignees.length > 0 && <AvatarStack people={assignees} />}
         </div>
       )}
       {checklistOpen && card.checklist.length > 0 && <CardChecklist card={card} onToggleItem={onToggleItem} />}
@@ -182,11 +191,12 @@ export function CardView({
 interface CardItemProps {
   card: Card
   labels: Label[]
+  team: TeamMember[]
   onOpen: (cardId: string) => void
   readOnly?: boolean
 }
 
-export function CardItem({ card, labels, onOpen, readOnly = false }: CardItemProps) {
+export function CardItem({ card, labels, team, onOpen, readOnly = false }: CardItemProps) {
   const { dispatch } = useStore()
   const [progressOpen, setProgressOpen] = useState(() => isExpanded('progress', card.id))
   const [checklistOpen, setChecklistOpen] = useState(() => isExpanded('checklist', card.id))
@@ -218,6 +228,7 @@ export function CardItem({ card, labels, onOpen, readOnly = false }: CardItemPro
       <CardView
         card={card}
         labels={labels}
+        team={team}
         expanded={progressOpen}
         onToggleProgress={toggle('progress', progressOpen, setProgressOpen)}
         checklistOpen={checklistOpen}

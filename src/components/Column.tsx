@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { Card, Column as ColumnType, Label } from '../types'
+import type { Card, Column as ColumnType, Label, TeamMember } from '../types'
 import { useStore } from '../state/context'
 import { createId } from '../lib/id'
 import { CardItem } from './CardItem'
@@ -14,6 +14,7 @@ interface ColumnProps {
   cards: Card[]
   totalCount: number
   labels: Label[]
+  team: TeamMember[]
   onOpenCard: (cardId: string) => void
   /** While searching or filtering, done columns show every match. */
   filterActive?: boolean
@@ -28,6 +29,7 @@ export function Column({
   cards,
   totalCount,
   labels,
+  team,
   onOpenCard,
   filterActive = false,
   activeCardId,
@@ -161,7 +163,7 @@ export function Column({
       <SortableContext items={shownCards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
         <ul className="card-list">
           {shownCards.map((card) => (
-            <CardItem key={card.id} card={card} labels={labels} onOpen={onOpenCard} readOnly={readOnly} />
+            <CardItem key={card.id} card={card} labels={labels} team={team} onOpen={onOpenCard} readOnly={readOnly} />
           ))}
           {cards.length === 0 && (
             <li className="column-empty">

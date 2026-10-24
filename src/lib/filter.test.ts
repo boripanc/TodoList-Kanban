@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Card } from '../types'
-import { emptyFilter, isFilterActive, matchesFilter } from './filter'
+import { emptyFilter, isFilterActive, matchesFilter, UNASSIGNED } from './filter'
 import { dueStatus, formatDue, todayISO } from './dates'
 
 const now = new Date(2026, 9, 6, 12) // 6 Oct 2026, local noon
@@ -11,6 +11,7 @@ function card(patch: Partial<Card> = {}): Card {
     title: 'Plan sprint',
     description: 'Talk to the team',
     labelIds: [],
+    assigneeIds: [],
     priority: 'none',
     dueDate: null,
     checklist: [],
@@ -23,6 +24,19 @@ function card(patch: Partial<Card> = {}): Card {
 }
 
 describe('matchesFilter', () => {
+  it('filters by assignee, including cards nobody is assigned to', () => {
+    const ana = card({ assigneeIds: ['ana'] })
+    const both = card({ assigneeIds: ['ana', 'ben'] })
+    const nobody = card()
+    const byAna = { ...emptyFilter, assigneeIds: ['ana'] }
+    expect(isFilterActive(byAna)).toBe(true)
+    expect([ana, both, nobody].map((c) => matchesFilter(c, byAna, now))).toEqual([true, true, false])
+    const unassigned = { ...emptyFilter, assigneeIds: [UNASSIGNED] }
+    expect([ana, both, nobody].map((c) => matchesFilter(c, unassigned, now))).toEqual([false, false, true])
+    const benOrNobody = { ...emptyFilter, assigneeIds: ['ben', UNASSIGNED] }
+    expect([ana, both, nobody].map((c) => matchesFilter(c, benOrNobody, now))).toEqual([false, true, true])
+  })
+
   it('matches everything with an empty filter', () => {
     expect(isFilterActive(emptyFilter)).toBe(false)
     expect(matchesFilter(card(), emptyFilter, now)).toBe(true)

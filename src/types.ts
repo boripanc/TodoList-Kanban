@@ -6,6 +6,15 @@ export interface Label {
   color: string
 }
 
+/** A person cards on a board can be assigned to. */
+export interface TeamMember {
+  id: string
+  name: string
+  color: string
+  /** How many open cards this person can take on at once; 0 means no limit. */
+  capacity: number
+}
+
 export interface ChecklistItem {
   id: string
   text: string
@@ -26,6 +35,8 @@ export interface Card {
   title: string
   description: string
   labelIds: string[]
+  /** Team members (ids from the board's team) working on this card. */
+  assigneeIds: string[]
   priority: Priority
   /** Local calendar date as YYYY-MM-DD, or null when unset. */
   dueDate: string | null
@@ -53,13 +64,15 @@ export interface Board {
   title: string
   columnIds: string[]
   labels: Label[]
+  /** People cards on this board can be assigned to. */
+  team: TeamMember[]
   createdAt: number
   /** Set when the board lives in an account (and may be shared); absent for boards kept on this device only. */
   cloud?: { role: Role }
 }
 
 export interface AppState {
-  version: 2
+  version: 3
   boardOrder: string[]
   activeBoardId: string | null
   boards: Record<string, Board>
@@ -73,5 +86,7 @@ export interface CardFilter {
   query: string
   labelIds: string[]
   priorities: Priority[]
+  /** Team member ids; `UNASSIGNED` matches cards nobody is assigned to. */
+  assigneeIds: string[]
   due: DueFilter
 }

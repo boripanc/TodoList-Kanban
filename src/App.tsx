@@ -16,9 +16,10 @@ import { ApiKeysDialog } from './components/ApiKeys'
 import { ContactsDialog } from './components/Contacts'
 import { CredentialsDialog } from './components/Credentials'
 import { InvitesDialog, ShareDialog } from './components/Sharing'
+import { TeamDialog } from './components/Team'
 import { roleName } from './cloud/api'
 import { useCloud } from './cloud/context'
-import { isReadOnly } from './state/reducer'
+import { findBoardOfCard, isReadOnly } from './state/reducer'
 
 export default function App() {
   const { state, dispatch } = useStore()
@@ -29,7 +30,16 @@ export default function App() {
   const [showFilters, setShowFilters] = useState(false)
   const [openCardId, setOpenCardId] = useState<string | null>(null)
   const [dialog, setDialog] = useState<
-    'new-board' | 'labels' | 'shortcuts' | 'share' | 'invites' | 'api-keys' | 'contacts' | 'credentials' | null
+    | 'new-board'
+    | 'labels'
+    | 'team'
+    | 'shortcuts'
+    | 'share'
+    | 'invites'
+    | 'api-keys'
+    | 'contacts'
+    | 'credentials'
+    | null
   >(null)
   const [theme, setTheme] = useState<Theme>(loadTheme)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -74,6 +84,8 @@ export default function App() {
         document.querySelector<HTMLButtonElement>('[data-add-card]')?.click()
       } else if (event.key === 'f' || event.key === 'F') {
         setShowFilters((v) => !v)
+      } else if (event.key === 'w' || event.key === 'W') {
+        setDialog('team')
       } else if (event.key === '?') {
         setDialog('shortcuts')
       }
@@ -83,7 +95,7 @@ export default function App() {
   }, [])
 
   const activeFilterCount =
-    filter.labelIds.length + filter.priorities.length + (filter.due !== 'any' ? 1 : 0)
+    filter.labelIds.length + filter.assigneeIds.length + filter.priorities.length + (filter.due !== 'any' ? 1 : 0)
 
   return (
     <div className="app">
@@ -132,6 +144,9 @@ export default function App() {
                 }}
               />
             </div>
+            <button className="button" onClick={() => setDialog('team')} title="Team and workload (W)">
+              Team
+            </button>
             <button
               className={`button ${showFilters || activeFilterCount ? 'active' : ''}`}
               aria-expanded={showFilters}
@@ -313,6 +328,25 @@ export default function App() {
           <LabelManager board={board} />
         </Modal>
       )}
+      {dialog === 'team' && board && (
+        <TeamDialog
+          board={board}
+          readOnly={readOnly}
+          cloud={cloud}
+          onClose={() => setDialog(null)}
+          onOpenCard={(card) => {
+            const cardBoard = findBoardOfCard(state, card.id)
+            if (cardBoard && cardBoard.id !== board.id) dispatch({ type: 'board/select', boardId: cardBoard.id })
+            setDialog(null)
+            setOpenCardId(card.id)
+          }}
+          onShowOnBoard={(memberId) => {
+            setFilter({ ...emptyFilter, assigneeIds: [memberId] })
+            setShowFilters(true)
+            setDialog(null)
+          }}
+        />
+      )}
       {cloud && dialog === 'share' && board && (
         <ShareDialog cloud={cloud} board={board} onClose={() => setDialog(null)} />
       )}
@@ -338,6 +372,8 @@ export default function App() {
             <dd>Add a card to the first column</dd>
             <dt>F</dt>
             <dd>Show or hide filters</dd>
+            <dt>W</dt>
+            <dd>Team and workload</dd>
             <dt>Enter</dt>
             <dd>Open the focused card</dd>
             <dt>Space</dt>

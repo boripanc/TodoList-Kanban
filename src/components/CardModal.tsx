@@ -8,6 +8,7 @@ import { Modal } from './Modal'
 import { NewLabelForm } from './LabelEditor'
 import { priorityLabel } from '../lib/priority'
 import { ProgressEditor } from './ProgressEditor'
+import { AssigneePicker } from './Team'
 
 const priorities: Priority[] = ['none', 'low', 'medium', 'high', 'urgent']
 
@@ -155,6 +156,8 @@ export function CardModal({
                 ))}
               </select>
             </label>
+
+            <AssigneePicker board={board} card={card} readOnly={readOnly} />
 
             <label className="field">
               <span>Priority</span>

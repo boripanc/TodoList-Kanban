@@ -319,7 +319,7 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
     const boardId = c.req.param('id')
     await requireRole(db, boardId, c.get('user').id, ['owner', 'editor', 'viewer'])
     const [board, columns, cards] = await Promise.all([
-      db.query('select id, title, labels, created_at from kanban.boards where id = $1', [boardId]),
+      db.query('select id, title, labels, team, created_at from kanban.boards where id = $1', [boardId]),
       db.query('select id, board_id, position, title, wip_limit from kanban.columns where board_id = $1', [boardId]),
       db.query('select * from kanban.cards where board_id = $1', [boardId]),
     ])
@@ -356,15 +356,17 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
     for (const card of cards) {
       const { rows } = await q.query(
         `insert into kanban.cards (id, board_id, column_id, position, title, description, label_ids, priority,
-           due_date, checklist, created_at, updated_at, progress, progress_log)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+           due_date, checklist, created_at, updated_at, progress, progress_log, assignee_ids)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $16)
          on conflict (id) do update set column_id = excluded.column_id, position = excluded.position,
            title = excluded.title, description = excluded.description, label_ids = excluded.label_ids,
            priority = excluded.priority, due_date = excluded.due_date, checklist = excluded.checklist,
            updated_at = excluded.updated_at,
            -- Apps from before progress existed don't send it; keep what is stored.
            progress = case when $15::boolean then excluded.progress else kanban.cards.progress end,
-           progress_log = case when $15::boolean then excluded.progress_log else kanban.cards.progress_log end
+           progress_log = case when $15::boolean then excluded.progress_log else kanban.cards.progress_log end,
+           -- Same for assignees, from apps before teams existed.
+           assignee_ids = case when $17::boolean then excluded.assignee_ids else kanban.cards.assignee_ids end
          where kanban.cards.board_id = excluded.board_id
          returning id`,
         [
@@ -383,6 +385,8 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
           card.progress ?? null,
           JSON.stringify(card.progress_log ?? []),
           card.progress !== undefined,
+          JSON.stringify(card.assignee_ids ?? []),
+          card.assignee_ids !== undefined,
         ],
       )
       if (!rows[0]) fail(409, 'That card id is already in use')
@@ -397,9 +401,9 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
     const userId = c.get('user').id
     await db.transaction(async (tx) => {
       const { rows } = await tx.query(
-        `insert into kanban.boards (id, owner_id, title, labels, created_at) values ($1, $2, $3, $4, $5)
+        `insert into kanban.boards (id, owner_id, title, labels, team, created_at) values ($1, $2, $3, $4, $5, $6)
          on conflict (id) do nothing returning id`,
-        [board.id, userId, board.title, JSON.stringify(board.labels), board.created_at],
+        [board.id, userId, board.title, JSON.stringify(board.labels), JSON.stringify(board.team ?? []), board.created_at],
       )
       if (!rows[0]) fail(409, 'A board with this id already exists')
       await tx.query("insert into kanban.board_members (board_id, user_id, role) values ($1, $2, 'owner')", [
@@ -418,10 +422,12 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
     await db.transaction(async (tx) => {
       await requireRole(tx, boardId, c.get('user').id, ['owner', 'editor'])
       if (ops.board) {
-        await tx.query('update kanban.boards set title = $2, labels = $3 where id = $1', [
+        // Apps from before teams existed don't send the team; keep what is stored.
+        await tx.query('update kanban.boards set title = $2, labels = $3, team = coalesce($4, team) where id = $1', [
           boardId,
           ops.board.title,
           JSON.stringify(ops.board.labels),
+          ops.board.team === undefined ? null : JSON.stringify(ops.board.team),
         ])
       }
       // Columns exist before cards move into them; cards go before their columns.

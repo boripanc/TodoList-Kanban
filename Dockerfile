@@ -14,6 +14,8 @@ ENV NODE_ENV=production PORT=8787
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server ./server
+# The server shares types and helpers with the app (validation, workload).
+COPY src ./src
 COPY --from=build /app/dist ./dist
 EXPOSE 8787
 CMD ["npm", "start"]

@@ -11,7 +11,7 @@ export function isAppState(value: unknown): value is AppState {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
   return (
-    (v.version === 1 || v.version === 2) &&
+    (v.version === 1 || v.version === 2 || v.version === 3) &&
     Array.isArray(v.boardOrder) &&
     typeof v.boards === 'object' &&
     v.boards !== null &&
@@ -22,13 +22,23 @@ export function isAppState(value: unknown): value is AppState {
   )
 }
 
-/** Bring saved state up to the current version. Version 1 cards had no progress. */
+/**
+ * Bring saved state up to the current version. Version 1 cards had no
+ * progress; boards before version 3 had no team and cards no assignees.
+ */
 export function migrateState(state: AppState): AppState {
   const cards: AppState['cards'] = {}
   for (const [id, card] of Object.entries(state.cards)) {
-    cards[id] = { ...card, progress: card.progress ?? null, progressLog: card.progressLog ?? [] }
+    cards[id] = {
+      ...card,
+      assigneeIds: card.assigneeIds ?? [],
+      progress: card.progress ?? null,
+      progressLog: card.progressLog ?? [],
+    }
   }
-  return { ...state, version: 2, cards }
+  const boards: AppState['boards'] = {}
+  for (const [id, board] of Object.entries(state.boards)) boards[id] = { ...board, team: board.team ?? [] }
+  return { ...state, version: 3, boards, cards }
 }
 
 export function loadState(storage: Storage | undefined = globalThis.localStorage): AppState {
@@ -82,6 +92,10 @@ export function createSampleState(): AppState {
   const work = state.boards[state.activeBoardId!]
   const [backlog, todo, doing, review, done] = work.columnIds
   const label = (name: string) => work.labels.find((l) => l.name === name)!.id
+  const alex = createId()
+  const sam = createId()
+  state = reducer(state, { type: 'team/add', boardId: work.id, member: { id: alex, name: 'Alex', color: '#0090ff', capacity: 3 } })
+  state = reducer(state, { type: 'team/add', boardId: work.id, member: { id: sam, name: 'Sam', color: '#d6409f', capacity: 0 } })
 
   const add = (columnId: string, title: string, patch: Parameters<typeof cardPatch>[0] = {}) => {
     const id = createId()
@@ -99,14 +113,21 @@ export function createSampleState(): AppState {
     dueDate: addDays(2),
     labelIds: [label('Meeting')],
     checklist: ['Review backlog', 'Estimate stories', 'Agree on goals'],
+    assigneeIds: [alex, sam],
   })
-  add(todo, 'Fix login timeout', { priority: 'urgent', dueDate: addDays(-1), labelIds: [label('Bug')] })
+  add(todo, 'Fix login timeout', {
+    priority: 'urgent',
+    dueDate: addDays(-1),
+    labelIds: [label('Bug')],
+    assigneeIds: [alex],
+  })
   const dragCard = add(doing, 'Drag me to another column', {
     description: 'Cards and columns can both be reordered by dragging.',
     priority: 'medium',
     labelIds: [label('Feature')],
     dueDate: addDays(0),
     progress: 40,
+    assigneeIds: [alex],
   })
   for (const [text, progress, ago] of [
     ['Tried dragging between columns', 20, 2],
@@ -143,6 +164,7 @@ export function createSampleState(): AppState {
 function cardPatch(seed: {
   description?: string
   labelIds?: string[]
+  assigneeIds?: string[]
   priority?: 'none' | 'low' | 'medium' | 'high' | 'urgent'
   dueDate?: string
   checklist?: string[]
@@ -152,6 +174,7 @@ function cardPatch(seed: {
   return {
     description: seed.description ?? '',
     labelIds: seed.labelIds ?? [],
+    assigneeIds: seed.assigneeIds ?? [],
     priority: seed.priority ?? 'none',
     dueDate: seed.dueDate ?? null,
     progress: seed.progress ?? null,
