@@ -997,6 +997,313 @@ input[aria-invalid='true'] {
 .team-editor h3 {
   margin: 4px 0;
 }
+
+/* Team calendar: who is busy when */
+.team-views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+.team-calendar {
+  margin-bottom: 16px;
+}
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 8px;
+}
+.calendar-toolbar .icon-button {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+.calendar-title {
+  min-width: 9.5em;
+  text-align: center;
+}
+.calendar-toolbar .button {
+  margin-left: auto;
+}
+.calendar-people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.timeline-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.timeline {
+  min-width: 560px;
+}
+.timeline-row {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  border-top: 1px solid var(--border);
+}
+.timeline-header {
+  grid-template-columns: 112px repeat(var(--days), minmax(0, 1fr));
+  border-top: none;
+  background: var(--surface-2);
+  font-size: 0.8rem;
+}
+.timeline-person {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+.timeline-header .timeline-person {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.timeline-person small {
+  font-weight: 400;
+}
+.timeline-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 0;
+  font-weight: 600;
+}
+.timeline-day small {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.timeline-day.weekend {
+  color: var(--muted);
+}
+.timeline-day.today {
+  color: var(--accent);
+}
+.timeline-track {
+  display: grid;
+  grid-template-columns: repeat(var(--days), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--lanes), 26px);
+  row-gap: 3px;
+  padding: 4px 0;
+  min-height: 34px;
+}
+.timeline-cell {
+  grid-row: 1 / -1;
+  margin: -4px 0;
+  border-left: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+.timeline-cell.weekend {
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+}
+.timeline-cell.today {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.timeline-cell.overlap {
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+.timeline-empty {
+  grid-row: 1;
+  grid-column: 1 / -1;
+  align-self: center;
+  padding-left: 8px;
+  font-size: 0.8rem;
+  z-index: 1;
+}
+.timeline-bar,
+.month-card {
+  --avatar: #8b8d98;
+  z-index: 1;
+  min-width: 0;
+  border: none;
+  border-left: 3px solid var(--avatar);
+  background: color-mix(in srgb, var(--avatar) 22%, var(--surface));
+  color: var(--text);
+  font-size: 0.78rem;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.timeline-bar {
+  margin: 0 2px;
+  padding: 0 6px;
+  border-radius: 6px;
+}
+.timeline-bar:hover,
+.month-card:hover {
+  background: color-mix(in srgb, var(--avatar) 34%, var(--surface));
+}
+.timeline-bar.open-ended {
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--avatar) 22%, var(--surface)) 60%,
+    transparent
+  );
+}
+.timeline-bar.clipped-start {
+  border-left-style: dashed;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: 0;
+}
+.timeline-bar.clipped-end {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  margin-right: 0;
+}
+.timeline-bar.overdue,
+.month-card.overdue {
+  box-shadow: inset 0 0 0 1px var(--danger);
+}
+.month {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.month-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.month-header {
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: center;
+  padding: 4px 0;
+}
+.month-day {
+  min-height: 92px;
+  padding: 4px;
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.month-day:first-child {
+  border-left: none;
+}
+.month-day.weekend {
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+}
+.month-day.other-month .month-date {
+  color: var(--muted);
+  opacity: 0.6;
+}
+.month-date {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.month-date > span:first-child {
+  border-radius: 999px;
+  padding: 0 6px;
+  margin-left: -2px;
+}
+.month-day.today .month-date > span:first-child {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.month-day.selected {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.month-detail {
+  margin-top: 10px;
+}
+.month-detail h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+.month-detail ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.month-detail li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+.month-detail .avatar-stack {
+  margin-left: 0;
+  padding-left: 0;
+}
+.month-dots {
+  display: none;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.month-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--avatar);
+}
+.month-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.month-card {
+  display: block;
+  width: 100%;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.month-more {
+  font-size: 0.75rem;
+  align-self: flex-start;
+}
+@media (max-width: 640px) {
+  /* Too narrow for titles: show a dot per busy person; the list view has the details. */
+  .month-day {
+    min-height: 52px;
+    padding: 0;
+  }
+  .month-date {
+    flex-direction: column;
+    align-items: flex-start;
+    flex: 1;
+    padding: 4px;
+  }
+  .month-dots {
+    display: flex;
+  }
+  .month-cards,
+  .month-more {
+    display: none;
+  }
+}
 .team-editor ul {
   list-style: none;
   padding: 0;
