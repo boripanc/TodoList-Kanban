@@ -1,6 +1,7 @@
 import type { AppState, Board, Card, Column, Label, Role, TeamMember } from '../types'
 import { extractBoardDoc, type BoardDoc } from '../cloud/doc'
 import { templateColumns, templateLabels, type BoardTemplate } from './templates'
+import { startWorkPatch } from '../lib/schedule'
 
 export type Action =
   | { type: 'board/add'; id: string; title: string; template: BoardTemplate; ids: string[]; now: number }
@@ -26,6 +27,12 @@ export type Action =
   | { type: 'card/delete'; cardId: string }
   | { type: 'card/duplicate'; cardId: string; newId: string; now: number }
   | { type: 'card/move'; cardId: string; toColumnId: string; toIndex: number }
+  /**
+   * After a move: if the card now sits in an in-progress column and hasn't
+   * started, it starts `today` and its due date follows from its estimate.
+   * R4C and Project cards keep the dates set by hand.
+   */
+  | { type: 'card/startWork'; cardId: string; today: string; now: number }
   /** Add a progress update; a given `progress` also becomes the card's progress. */
   | { type: 'card/logProgress'; cardId: string; id: string; text: string; progress: number | null; now: number }
   | { type: 'card/deleteProgress'; cardId: string; entryId: string; now: number }
@@ -40,7 +47,7 @@ export type Action =
   | { type: 'cloud/clear' }
 
 export const initialState: AppState = {
-  version: 4,
+  version: 5,
   boardOrder: [],
   activeBoardId: null,
   boards: {},
@@ -101,6 +108,7 @@ function targetBoardId(state: AppState, action: Action): string | undefined {
     case 'card/delete':
     case 'card/duplicate':
     case 'card/move':
+    case 'card/startWork':
     case 'card/logProgress':
     case 'card/deleteProgress':
     case 'card/toggleAssignee': {
@@ -344,6 +352,7 @@ export function reducer(state: AppState, action: Action): AppState {
         priority: 'none',
         startDate: null,
         dueDate: null,
+        estimateDays: null,
         checklist: [],
         progress: null,
         progressLog: [],
@@ -464,6 +473,17 @@ export function reducer(state: AppState, action: Action): AppState {
           [to.id]: { ...to, cardIds: insertAt(to.cardIds, action.toIndex, action.cardId) },
         },
       }
+    }
+
+    case 'card/startWork': {
+      const card = state.cards[action.cardId]
+      const column = findColumnOfCard(state, action.cardId)
+      const board = column && Object.values(state.boards).find((b) => b.columnIds.includes(column.id))
+      if (!card || !column || !board) return state
+      const labelNames = board.labels.filter((l) => card.labelIds.includes(l.id)).map((l) => l.name)
+      const patch = startWorkPatch(card, labelNames, column.title, action.today)
+      if (!patch) return state
+      return { ...state, cards: { ...state.cards, [card.id]: { ...card, ...patch, updatedAt: action.now } } }
     }
 
     case 'state/replace': {

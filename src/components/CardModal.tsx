@@ -3,8 +3,8 @@ import type { Board, Card, Priority } from '../types'
 import { useStore } from '../state/context'
 import { findColumnOfCard } from '../state/reducer'
 import { createId } from '../lib/id'
-import { dueStatus, formatDue } from '../lib/dates'
-import { needsDateRange, scheduleProblem } from '../lib/schedule'
+import { dueStatus, formatDue, todayISO } from '../lib/dates'
+import { dueFromEstimate, MAX_ESTIMATE_DAYS, needsDateRange, scheduleProblem } from '../lib/schedule'
 import { Modal } from './Modal'
 import { NewLabelForm } from './LabelEditor'
 import { priorityLabel } from '../lib/priority'
@@ -33,6 +33,18 @@ export function CardModal({
   const labelNames = board.labels.filter((l) => card.labelIds.includes(l.id)).map((l) => l.name)
   const needsRange = needsDateRange(labelNames)
   const dateProblem = scheduleProblem(card, labelNames)
+  const [estimate, setEstimate] = useState(card.estimateDays === null ? '' : String(card.estimateDays))
+
+  /** Other cards' due date follows from their start date and estimate. */
+  const planned = (startDate: string | null, estimateDays: number | null) =>
+    !needsRange && startDate && estimateDays ? { dueDate: dueFromEstimate(startDate, estimateDays) } : {}
+
+  const commitEstimate = () => {
+    const n = estimate.trim() === '' ? null : Number(estimate)
+    const estimateDays = n !== null && Number.isFinite(n) && n > 0 ? Math.min(n, MAX_ESTIMATE_DAYS) : null
+    setEstimate(estimateDays === null ? '' : String(estimateDays))
+    if (estimateDays !== card.estimateDays) update({ estimateDays, ...planned(card.startDate, estimateDays) })
+  }
 
   const update = (patch: Partial<Omit<Card, 'id' | 'createdAt'>>) =>
     dispatch({ type: 'card/update', cardId: card.id, patch, now: Date.now() })
@@ -62,6 +74,7 @@ export function CardModal({
 
   const close = () => {
     commitText()
+    commitEstimate()
     onClose()
   }
 
@@ -153,6 +166,7 @@ export function CardModal({
                 onChange={(e) => {
                   const target = state.columns[e.target.value]
                   dispatch({ type: 'card/move', cardId: card.id, toColumnId: target.id, toIndex: target.cardIds.length })
+                  dispatch({ type: 'card/startWork', cardId: card.id, today: todayISO(), now: Date.now() })
                 }}
               >
                 {board.columnIds.map((id) => (
@@ -177,6 +191,32 @@ export function CardModal({
             </label>
 
             <div className="field">
+              <label htmlFor="estimate">Estimate (MD)</label>
+              <input
+                id="estimate"
+                type="number"
+                inputMode="decimal"
+                min={0.5}
+                max={MAX_ESTIMATE_DAYS}
+                step={0.5}
+                placeholder="Man-days"
+                value={estimate}
+                onChange={(e) => setEstimate(e.target.value)}
+                onBlur={commitEstimate}
+                onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+              />
+              {!needsRange && (
+                <small className="muted">
+                  {card.startDate
+                    ? card.estimateDays
+                      ? 'Due date is worked out from the start date and estimate (weekdays).'
+                      : 'Add an estimate to work out the due date.'
+                    : 'Starts when the card moves to In progress.'}
+                </small>
+              )}
+            </div>
+
+            <div className="field">
               <label htmlFor="start-date">
                 Start date{needsRange && <span className="required-mark"> (required)</span>}
               </label>
@@ -189,7 +229,10 @@ export function CardModal({
                   max={card.dueDate ?? undefined}
                   required={needsRange}
                   aria-invalid={needsRange && !card.startDate}
-                  onChange={(e) => update({ startDate: e.target.value || null })}
+                  onChange={(e) => {
+                    const startDate = e.target.value || null
+                    update({ startDate, ...planned(startDate, card.estimateDays) })
+                  }}
                 />
                 {card.startDate && (
                   <button

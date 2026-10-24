@@ -8,6 +8,8 @@ import { createApp } from '../src/app.ts'
 import type { Db, Queryable } from '../src/db.ts'
 import { EventHub, type ServerEvent } from '../src/events.ts'
 import { migrate } from '../src/migrate.ts'
+import { todayISO } from '../../src/lib/dates.ts'
+import { dueFromEstimate } from '../../src/lib/schedule.ts'
 
 function pgliteDb(pg: PGlite): Db {
   const query = async <T>(q: Pick<PGlite, 'query' | 'exec'>, sql: string, params?: unknown[]) => {
@@ -241,6 +243,24 @@ describe('boards', () => {
     const viewer = await share(ana, 'ben@example.com', 'viewer')
     const refused = await viewer.call('POST', '/boards/b1/changes', {
       upsertCards: [{ ...card('c1', 'x', 'col1', 0), start_date: '2026-10-01' }],
+    })
+    expect(refused.status).toBe(403)
+  })
+
+  it('syncs card estimates, and keeps them when an older app leaves them out', async () => {
+    const ana = await ownerWithBoard()
+    await ana.call('POST', '/boards/b1/changes', {
+      upsertCards: [{ ...card('c1', 'Book flights', 'col1', 0), estimate_days: 2.5 }],
+    })
+    const stored = () => ana.call('GET', '/boards/b1').then((r) => r.data.cards[0])
+    expect((await stored()).estimate_days).toBe(2.5)
+    await ana.call('POST', '/boards/b1/changes', { upsertCards: [card('c1', 'Book cheap flights', 'col1', 0)] })
+    expect(await stored()).toMatchObject({ title: 'Book cheap flights', estimate_days: 2.5 })
+    const bad = await ana.call('POST', '/boards/b1/changes', { upsertCards: [{ ...card('c1', 'x'), estimate_days: -1 }] })
+    expect(bad.status).toBe(400)
+    const viewer = await share(ana, 'ben@example.com', 'viewer')
+    const refused = await viewer.call('POST', '/boards/b1/changes', {
+      upsertCards: [{ ...card('c1', 'x', 'col1', 0), estimate_days: 1 }],
     })
     expect(refused.status).toBe(403)
   })
@@ -646,6 +666,48 @@ describe('REST API (v1)', () => {
     expect((await viewer.call('PATCH', `/v1/cards/${id}`, { startDate: '2026-11-04' })).status).toBe(403)
   })
 
+  it('starts cards that move into progress and works out their due date from the estimate', async () => {
+    const ana = await ownerWithBoard()
+    const n8n = await apiKeyFor(ana)
+    await n8n.call('POST', '/v1/boards/b1/columns', { title: 'In progress', position: 1 })
+    const today = todayISO()
+
+    const fix = (await n8n.call('POST', '/v1/boards/b1/cards', { column: 'To do', title: 'Fix import', estimateDays: 3 })).data
+    expect(fix).toMatchObject({ estimateDays: 3, startDate: null, dueDate: null })
+    const started = await n8n.call('PATCH', `/v1/cards/${fix.id}`, { column: 'In progress' })
+    expect(started.data).toMatchObject({ startDate: today, dueDate: dueFromEstimate(today, 3) })
+    // A new estimate moves the due date; a given due date wins.
+    expect((await n8n.call('PATCH', `/v1/cards/${fix.id}`, { estimateDays: 1 })).data.dueDate).toBe(
+      dueFromEstimate(today, 1),
+    )
+    expect((await n8n.call('PATCH', `/v1/cards/${fix.id}`, { dueDate: '2030-01-01' })).data.dueDate).toBe('2030-01-01')
+    // Moving out and back keeps the first start date.
+    await n8n.call('PATCH', `/v1/cards/${fix.id}`, { column: 'To do' })
+    const back = await n8n.call('PATCH', `/v1/cards/${fix.id}`, { column: 'In progress', estimateDays: 2 })
+    expect(back.data).toMatchObject({ startDate: today, dueDate: dueFromEstimate(today, 2) })
+
+    // Created straight into progress.
+    const quick = await n8n.call('POST', '/v1/boards/b1/cards', { column: 'In progress', title: 'Quick fix', estimateDays: 0.5 })
+    expect(quick.data).toMatchObject({ startDate: today, dueDate: dueFromEstimate(today, 0.5) })
+
+    // R4C cards keep their own dates.
+    const r4c = await n8n.call('POST', '/v1/boards/b1/cards', {
+      column: 'To do',
+      title: 'Onboard partner',
+      labels: ['R4C'],
+      startDate: '2030-02-01',
+      dueDate: '2030-03-01',
+      estimateDays: 5,
+    })
+    const moved = await n8n.call('PATCH', `/v1/cards/${r4c.data.id}`, { column: 'In progress' })
+    expect(moved.data).toMatchObject({ startDate: '2030-02-01', dueDate: '2030-03-01' })
+
+    expect((await n8n.call('PATCH', `/v1/cards/${fix.id}`, { estimateDays: 0 })).status).toBe(400)
+    expect((await n8n.call('PATCH', `/v1/cards/${fix.id}`, { estimateDays: '3' })).status).toBe(400)
+    const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
+    expect((await viewer.call('PATCH', `/v1/cards/${fix.id}`, { estimateDays: 4 })).status).toBe(403)
+  })
+
   it('gives API keys their owner’s role on each board', async () => {
     const ana = await ownerWithBoard()
     const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
@@ -835,6 +897,14 @@ describe('MCP endpoint', () => {
     expect(dated).toMatchObject({ startDate: '2026-11-01', dueDate: '2026-11-20' })
     expect(await call('update_card', { cardId: dated.id, startDate: '2026-11-02' })).toMatchObject({
       startDate: '2026-11-02',
+    })
+    const sized = await call('create_card', { boardId: 'b1', column: 'To do', title: 'Fix mapping', estimateDays: 2 })
+    expect(sized).toMatchObject({ estimateDays: 2, startDate: null })
+    // Moving into progress with move_card starts it; Done isn't "in progress", so a new column is added.
+    await call('add_column', { boardId: 'b1', title: 'Doing' })
+    expect(await call('move_card', { cardId: sized.id, column: 'Doing' })).toMatchObject({
+      startDate: todayISO(),
+      dueDate: dueFromEstimate(todayISO(), 2),
     })
   })
 

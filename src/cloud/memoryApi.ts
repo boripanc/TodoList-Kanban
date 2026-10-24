@@ -166,7 +166,8 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
             : {}
         const assignees = row.assignee_ids === undefined ? { assignee_ids: previous?.assignee_ids ?? [] } : {}
         const start = row.start_date === undefined ? { start_date: previous?.start_date ?? null } : {}
-        server.cards.set(row.id, structuredClone({ ...row, ...progress, ...assignees, ...start }))
+        const estimate = row.estimate_days === undefined ? { estimate_days: previous?.estimate_days ?? null } : {}
+        server.cards.set(row.id, structuredClone({ ...row, ...progress, ...assignees, ...start, ...estimate }))
       }
       for (const id of ops.deleteCardIds) server.cards.delete(id)
       for (const id of ops.deleteColumnIds) {

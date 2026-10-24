@@ -10,6 +10,8 @@ import { MemoryServer } from './cloud/memoryApi'
 import { UnreachableError } from './cloud/serverApi'
 import { extractBoardDoc } from './cloud/doc'
 import { initialState, reducer } from './state/reducer'
+import { todayISO } from './lib/dates'
+import { dueFromEstimate } from './lib/schedule'
 
 function renderApp() {
   return render(
@@ -118,6 +120,33 @@ describe('App', () => {
     await user.keyboard('{Escape}')
     expect(within(card).queryByText(/Needs dates/)).not.toBeInTheDocument()
     expect(within(card).getByTitle('2030-01-01 to 2030-02-15')).toHaveTextContent('Jan 1, 2030 – Feb 15, 2030')
+  })
+
+  it('starts a card when it moves to In progress and works out the due date from the estimate', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    await user.click(screen.getByText('Explore keyboard shortcuts'))
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText('Starts when the card moves to In progress.')).toBeInTheDocument()
+    await user.type(within(dialog).getByLabelText('Estimate (MD)'), '3{Enter}')
+    await user.selectOptions(within(dialog).getByLabelText('Column'), 'In progress')
+
+    const start = within(dialog).getByLabelText('Start date') as HTMLInputElement
+    expect(start.value).toBe(todayISO())
+    const due = within(dialog).getByLabelText('Due date') as HTMLInputElement
+    expect(due.value).toBe(dueFromEstimate(todayISO(), 3))
+    expect(within(dialog).getByText(/worked out from the start date and estimate/)).toBeInTheDocument()
+
+    // Changing the estimate moves the due date.
+    const estimate = within(dialog).getByLabelText('Estimate (MD)')
+    await user.clear(estimate)
+    await user.type(estimate, '1{Enter}')
+    expect(due.value).toBe(dueFromEstimate(todayISO(), 1))
+
+    await user.keyboard('{Escape}')
+    const card = screen.getByText('Explore keyboard shortcuts').closest('.card') as HTMLElement
+    expect(within(card).getByTitle('Estimate: 1 man-days')).toHaveTextContent('⏱ 1 MD')
+    expect(within(screen.getByRole('region', { name: 'Column: In progress' })).getByText('Explore keyboard shortcuts')).toBeInTheDocument()
   })
 
   it('tracks a card’s progress and logs progress updates', async () => {
@@ -283,7 +312,7 @@ describe('storage', () => {
     )
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 1, cards }))
     const state = loadState()
-    expect(state.version).toBe(4)
+    expect(state.version).toBe(5)
     expect(Object.keys(state.cards)).toEqual(Object.keys(saved.cards))
     for (const card of Object.values(state.cards)) expect(card.progressLog).toEqual([])
   })
@@ -296,9 +325,20 @@ describe('storage', () => {
     const boards = Object.fromEntries(Object.entries(saved.boards).map(([id, { team: _t, ...board }]) => [id, board]))
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 2, boards, cards }))
     const state = loadState()
-    expect(state.version).toBe(4)
+    expect(state.version).toBe(5)
     for (const board of Object.values(state.boards)) expect(board.team).toEqual([])
     for (const card of Object.values(state.cards)) expect(card.assigneeIds).toEqual([])
+  })
+
+  it('upgrades cards saved before estimates existed', () => {
+    const saved = createSampleState()
+    const cards = Object.fromEntries(
+      Object.entries(saved.cards).map(([id, { estimateDays: _e, ...card }]) => [id, card]),
+    )
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 4, cards }))
+    const state = loadState()
+    expect(state.version).toBe(5)
+    for (const card of Object.values(state.cards)) expect(card.estimateDays).toBeNull()
   })
 
   it('upgrades cards saved before start dates existed', () => {
@@ -306,7 +346,7 @@ describe('storage', () => {
     const cards = Object.fromEntries(Object.entries(saved.cards).map(([id, { startDate: _s, ...card }]) => [id, card]))
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 3, cards }))
     const state = loadState()
-    expect(state.version).toBe(4)
+    expect(state.version).toBe(5)
     for (const card of Object.values(state.cards)) expect(card.startDate).toBeNull()
   })
 })

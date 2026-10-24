@@ -37,3 +37,59 @@ export function formatSchedule(card: Schedule, now: Date = new Date()): string |
   if (card.dueDate) return formatDue(card.dueDate, now)
   return null
 }
+
+// Other cards get their dates from the work itself: the start date is set when
+// the card first moves into an in-progress column, and the due date follows
+// from the estimate in man-days (MD), counting weekdays only.
+
+const IN_PROGRESS_WORDS = /\b(in[ -]?progress|doing|wip|ongoing|started|working)\b/i
+
+/** A column counts as in progress when its title says so, such as "In progress" or "Doing". */
+export function isInProgressColumn(title: string): boolean {
+  return IN_PROGRESS_WORDS.test(title)
+}
+
+const parse = (date: string) => {
+  const [y, m, d] = date.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d))
+}
+const iso = (date: Date) => date.toISOString().slice(0, 10)
+const weekend = (date: Date) => date.getUTCDay() === 0 || date.getUTCDay() === 6
+
+/**
+ * The day a task of `estimateDays` man-days ends when it starts on `start`,
+ * counting weekdays only: 1 MD ends the day it starts, 3 MD started on a
+ * Thursday end on Monday. Part days count as a whole day.
+ */
+export function dueFromEstimate(start: string, estimateDays: number): string {
+  const day = parse(start)
+  while (weekend(day)) day.setUTCDate(day.getUTCDate() + 1)
+  for (let left = Math.max(1, Math.ceil(estimateDays)) - 1; left > 0; ) {
+    day.setUTCDate(day.getUTCDate() + 1)
+    if (!weekend(day)) left--
+  }
+  return iso(day)
+}
+
+export interface Plannable extends Schedule {
+  estimateDays: number | null
+}
+
+/**
+ * The dates a card gets when it moves into `columnTitle` on `today`: a start
+ * date of today, and a due date from its estimate. Null when nothing changes:
+ * the column isn't in progress, the card already started, or it is an R4C or
+ * Project card, whose dates are set by hand.
+ */
+export function startWorkPatch(
+  card: Plannable,
+  labelNames: string[],
+  columnTitle: string,
+  today: string,
+): { startDate: string; dueDate?: string } | null {
+  if (!isInProgressColumn(columnTitle) || card.startDate || needsDateRange(labelNames)) return null
+  return card.estimateDays ? { startDate: today, dueDate: dueFromEstimate(today, card.estimateDays) } : { startDate: today }
+}
+
+/** The largest estimate accepted, in man-days. */
+export const MAX_ESTIMATE_DAYS = 999

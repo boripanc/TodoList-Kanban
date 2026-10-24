@@ -19,6 +19,7 @@ import type { Board as BoardType, Card, CardFilter } from '../types'
 import { useStore } from '../state/context'
 import { findColumnOfCard } from '../state/reducer'
 import { isFilterActive, matchesFilter } from '../lib/filter'
+import { todayISO } from '../lib/dates'
 import { createId } from '../lib/id'
 import { Column } from './Column'
 import { CardView } from './CardItem'
@@ -124,8 +125,13 @@ export function Board({ board, filter, onOpenCard, readOnly = false }: BoardProp
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     setActive(null)
     lastDragEnd.current = Date.now()
-    if (!over) return
     const activeId = String(active.id)
+    // Cards change columns while dragging, so a card dropped in progress starts here, once it has settled.
+    const startWork = () => dispatch({ type: 'card/startWork', cardId: activeId, today: todayISO(), now: Date.now() })
+    if (!over) {
+      if (active.data.current?.type !== 'column') startWork()
+      return
+    }
     const overId = String(over.id)
 
     if (active.data.current?.type === 'column') {
@@ -141,17 +147,19 @@ export function Board({ board, filter, onOpenCard, readOnly = false }: BoardProp
     }
 
     const column = findColumnOfCard(state, activeId)
-    if (!column || activeId === overId) return
+    if (!column) return
+    if (activeId === overId) return startWork()
     // A card held back from changing columns mid-drag still lands where it is dropped.
     const toColumnId = columnForOver(overId)
     if (toColumnId && toColumnId !== column.id) {
       dispatch({ type: 'card/move', cardId: activeId, toColumnId, toIndex: dropIndex(toColumnId, active, over) })
-      return
+      return startWork()
     }
     const overIndex = column.cardIds.indexOf(overId)
     if (overIndex >= 0) {
       dispatch({ type: 'card/move', cardId: activeId, toColumnId: column.id, toIndex: overIndex })
     }
+    startWork()
   }
 
   const openCard = (cardId: string) => {

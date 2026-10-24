@@ -2,6 +2,7 @@ import type { BoardOps, BoardRow, CardRow, ColumnRow } from '../../src/cloud/doc
 import type { ProgressEntry, TeamMember } from '../../src/types.ts'
 import type { ContactInput, CredentialField, CredentialInput } from '../../src/cloud/api.ts'
 import { credentialKinds, type CredentialKind } from '../../src/lib/credentials.ts'
+import { MAX_ESTIMATE_DAYS } from '../../src/lib/schedule.ts'
 
 /** Thrown for a request body that doesn't have the expected shape; becomes a 400. */
 export class BadRequest extends Error {}
@@ -36,6 +37,14 @@ function percent(value: unknown, what: string): number | null {
   const n = int(value, what)
   if (n < 0 || n > 100) throw new BadRequest(`${what} must be from 0 to 100`)
   return n
+}
+
+/** Man-days: a positive number up to 999, or null. */
+function estimate(value: unknown, what: string): number | null {
+  if (value === null) return null
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > MAX_ESTIMATE_DAYS)
+    throw new BadRequest(`${what} must be a number of man-days above 0 and up to ${MAX_ESTIMATE_DAYS}`)
+  return value
 }
 
 function arr(value: unknown, what: string, max = 1000): unknown[] {
@@ -111,6 +120,8 @@ export function cardRow(value: unknown, boardId: string): CardRow {
       ? {}
       : { start_date: c.start_date === null ? null : str(c.start_date, 'start_date', 10) }),
     due_date: c.due_date === null ? null : str(c.due_date, 'due_date', 10),
+    // Apps from before estimates existed leave it out; the database then keeps what it has.
+    ...(c.estimate_days === undefined ? {} : { estimate_days: estimate(c.estimate_days, 'estimate_days') }),
     checklist: arr(c.checklist, 'checklist', 500).map((item) => {
       const i = obj(item, 'checklist item')
       if (typeof i.done !== 'boolean') throw new BadRequest('checklist done must be true or false')
@@ -200,6 +211,8 @@ export interface CardInput {
   startDate?: string | null
   /** When it is due: the end date. */
   dueDate?: string | null
+  /** Estimated effort in man-days. */
+  estimateDays?: number | null
   /** Label ids or names; unknown names become new labels. */
   labels?: string[]
   checklist?: { text: string; done: boolean }[]
@@ -311,6 +324,7 @@ export function cardInput(value: unknown, isNew: boolean): CardInput {
     priority: optional(c.priority, priority),
     startDate: optional(c.startDate, (v) => (v === null || v === '' ? null : date(v, 'startDate'))),
     dueDate: optional(c.dueDate, (v) => (v === null || v === '' ? null : date(v, 'dueDate'))),
+    estimateDays: optional(c.estimateDays, (v) => estimate(v, 'estimateDays')),
     labels: optional(c.labels, (v) => arr(v, 'labels', 200).map((l) => title(l, 'label', 100))),
     checklist: optional(c.checklist, (v) =>
       arr(v, 'checklist', 500).map((item) => {

@@ -55,6 +55,15 @@ const cardFields = {
     nullable: true,
     description: 'The end date; null or "" clears it. Cards labelled R4C or Project need both startDate and dueDate.',
   },
+  estimateDays: {
+    type: 'number',
+    nullable: true,
+    minimum: 0,
+    exclusiveMinimum: true,
+    maximum: 999,
+    description:
+      'Estimated effort in man-days (MD). For cards not labelled R4C or Project, the due date is worked out from the start date and this (weekdays only), and the start date is set to today when the card moves into an in-progress column.',
+  },
   labels: {
     type: 'array',
     items: { type: 'string' },
@@ -363,6 +372,7 @@ export function openApiSpec() {
             priority,
             startDate: { ...date, nullable: true },
             dueDate: { ...date, nullable: true, description: 'The end date' },
+            estimateDays: { type: 'number', nullable: true, description: 'Estimated effort in man-days' },
             labels: { type: 'array', items: ref('Label') },
             assignees: {
               type: 'array',

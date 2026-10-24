@@ -11,7 +11,7 @@ export function isAppState(value: unknown): value is AppState {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
   return (
-    (v.version === 1 || v.version === 2 || v.version === 3 || v.version === 4) &&
+    (v.version === 1 || v.version === 2 || v.version === 3 || v.version === 4 || v.version === 5) &&
     Array.isArray(v.boardOrder) &&
     typeof v.boards === 'object' &&
     v.boards !== null &&
@@ -25,7 +25,7 @@ export function isAppState(value: unknown): value is AppState {
 /**
  * Bring saved state up to the current version. Version 1 cards had no
  * progress; boards before version 3 had no team and cards no assignees;
- * cards before version 4 had no start date.
+ * cards before version 4 had no start date, and before version 5 no estimate.
  */
 export function migrateState(state: AppState): AppState {
   const cards: AppState['cards'] = {}
@@ -34,13 +34,14 @@ export function migrateState(state: AppState): AppState {
       ...card,
       assigneeIds: card.assigneeIds ?? [],
       startDate: card.startDate ?? null,
+      estimateDays: card.estimateDays ?? null,
       progress: card.progress ?? null,
       progressLog: card.progressLog ?? [],
     }
   }
   const boards: AppState['boards'] = {}
   for (const [id, board] of Object.entries(state.boards)) boards[id] = { ...board, team: board.team ?? [] }
-  return { ...state, version: 4, boards, cards }
+  return { ...state, version: 5, boards, cards }
 }
 
 export function loadState(storage: Storage | undefined = globalThis.localStorage): AppState {
@@ -171,6 +172,7 @@ function cardPatch(seed: {
   priority?: 'none' | 'low' | 'medium' | 'high' | 'urgent'
   startDate?: string
   dueDate?: string
+  estimateDays?: number
   checklist?: string[]
   checkedAll?: boolean
   progress?: number
@@ -182,6 +184,7 @@ function cardPatch(seed: {
     priority: seed.priority ?? 'none',
     startDate: seed.startDate ?? null,
     dueDate: seed.dueDate ?? null,
+    estimateDays: seed.estimateDays ?? null,
     progress: seed.progress ?? null,
     checklist: (seed.checklist ?? []).map((text) => ({
       id: createId(),

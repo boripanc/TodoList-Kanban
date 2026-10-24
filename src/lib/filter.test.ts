@@ -15,6 +15,7 @@ function card(patch: Partial<Card> = {}): Card {
     priority: 'none',
     startDate: null,
     dueDate: null,
+    estimateDays: null,
     checklist: [],
     progress: null,
     progressLog: [],

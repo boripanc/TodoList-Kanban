@@ -42,6 +42,8 @@ export interface Card {
   startDate: string | null
   /** Due date (the end date), as a local calendar date YYYY-MM-DD, or null when unset. */
   dueDate: string | null
+  /** Estimated effort in man-days (MD), or null when not estimated. */
+  estimateDays: number | null
   checklist: ChecklistItem[]
   /** How far along the task is, 0-100, or null when not tracked. */
   progress: number | null
@@ -74,7 +76,7 @@ export interface Board {
 }
 
 export interface AppState {
-  version: 4
+  version: 5
   boardOrder: string[]
   activeBoardId: string | null
   boards: Record<string, Board>
