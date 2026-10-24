@@ -146,6 +146,80 @@ describe('App', () => {
     expect(within(screen.getByRole('dialog')).getByText('Checklist (2/3)')).toBeInTheDocument()
   })
 
+  it('shows who is assigned on the card and assigns people in the card dialog', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    const card = screen.getByRole('button', { name: 'Card: Plan next sprint' })
+    expect(within(card).getByRole('img', { name: 'Assigned to Alex, Sam' })).toBeInTheDocument()
+
+    await user.click(screen.getByText('Explore keyboard shortcuts'))
+    const dialog = screen.getByRole('dialog')
+    // Alex already has 3 open cards, which is their capacity.
+    expect(within(dialog).getByRole('button', { name: /Alex/ })).toHaveTextContent('full')
+    await user.click(within(dialog).getByRole('button', { name: /Sam/ }))
+    expect(within(dialog).getByRole('button', { name: /Sam/ })).toHaveAttribute('aria-pressed', 'true')
+    await user.type(within(dialog).getByLabelText('New team member name'), 'Kim{Enter}')
+    expect(within(dialog).getByRole('button', { name: /Kim/ })).toHaveAttribute('aria-pressed', 'true')
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }))
+
+    const explored = screen.getByRole('button', { name: 'Card: Explore keyboard shortcuts' })
+    expect(within(explored).getByRole('img', { name: 'Assigned to Sam, Kim' })).toBeInTheDocument()
+  })
+
+  it('filters the board by assignee', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    await user.click(screen.getByRole('button', { name: /^Filter/ }))
+    const filters = screen.getByRole('group', { name: 'Filters' })
+    await user.click(within(filters).getByRole('button', { name: /Sam/ }))
+    expect(screen.getByText('Plan next sprint')).toBeInTheDocument()
+    expect(screen.queryByText('Fix login timeout')).not.toBeInTheDocument()
+    await user.click(within(filters).getByRole('button', { name: /Sam/ }))
+    await user.click(within(filters).getByRole('button', { name: 'Unassigned' }))
+    expect(screen.getByText('Explore keyboard shortcuts')).toBeInTheDocument()
+    expect(screen.queryByText('Plan next sprint')).not.toBeInTheDocument()
+  })
+
+  it('shows each person’s workload and edits the team', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    await user.click(screen.getByRole('button', { name: 'Team' }))
+    const dialog = screen.getByRole('dialog', { name: 'Team and workload' })
+    const alex = within(dialog).getByRole('listitem', { name: 'Workload: Alex' })
+    expect(alex).toHaveTextContent('3 of 3 open')
+    expect(alex).toHaveTextContent('At capacity')
+    expect(alex).toHaveTextContent('1 overdue')
+    await user.click(within(alex).getByRole('button', { name: 'Show 3 open cards' }))
+    expect(within(alex).getByRole('button', { name: 'Fix login timeout' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('listitem', { name: 'Workload: Unassigned' })).toHaveTextContent('2 open cards')
+
+    // Lowering Alex's capacity puts them over it.
+    const capacity = within(dialog).getByLabelText('Capacity of Alex')
+    await user.clear(capacity)
+    await user.type(capacity, '2')
+    expect(alex).toHaveTextContent('Over capacity')
+
+    await user.type(within(dialog).getByLabelText('New team member name'), 'Kim')
+    await user.type(within(dialog).getByLabelText('New team member capacity'), '4')
+    await user.click(within(dialog).getByRole('button', { name: 'Add to team' }))
+    expect(within(dialog).getByRole('listitem', { name: 'Workload: Kim' })).toHaveTextContent('0 of 4 open')
+
+    // Opening a card from the workload list closes the dialog and shows the card.
+    await user.click(within(alex).getByRole('button', { name: 'Fix login timeout' }))
+    expect(screen.getByRole('dialog', { name: 'Edit card: Fix login timeout' })).toBeInTheDocument()
+  })
+
+  it('filters the board to one person from the workload view', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    await user.click(screen.getByRole('button', { name: 'Team' }))
+    const sam = within(screen.getByRole('dialog')).getByRole('listitem', { name: 'Workload: Sam' })
+    await user.click(within(sam).getByRole('button', { name: 'Filter board' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByText('Plan next sprint')).toBeInTheDocument()
+    expect(screen.queryByText('Fix login timeout')).not.toBeInTheDocument()
+  })
+
   it('creates a new board from a template', async () => {
     const user = userEvent.setup()
     renderApp()
@@ -172,9 +246,22 @@ describe('storage', () => {
     )
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 1, cards }))
     const state = loadState()
-    expect(state.version).toBe(2)
+    expect(state.version).toBe(3)
     expect(Object.keys(state.cards)).toEqual(Object.keys(saved.cards))
     for (const card of Object.values(state.cards)) expect(card.progressLog).toEqual([])
+  })
+
+  it('upgrades boards saved before teams existed', () => {
+    const saved = createSampleState()
+    const cards = Object.fromEntries(
+      Object.entries(saved.cards).map(([id, { assigneeIds: _a, ...card }]) => [id, card]),
+    )
+    const boards = Object.fromEntries(Object.entries(saved.boards).map(([id, { team: _t, ...board }]) => [id, board]))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 2, boards, cards }))
+    const state = loadState()
+    expect(state.version).toBe(3)
+    for (const board of Object.values(state.boards)) expect(board.team).toEqual([])
+    for (const card of Object.values(state.cards)) expect(card.assigneeIds).toEqual([])
   })
 })
 

@@ -4,9 +4,19 @@
 // Positions are renumbered here, so callers only say where things go.
 import { randomUUID } from 'node:crypto'
 import type { CardRow } from '../../src/cloud/doc.ts'
+import type { TeamMember } from '../../src/types.ts'
+import { isDoneColumn } from '../../src/lib/done.ts'
+import { computeWorkload, loadLevel, mergeWorkloads, type LoadLevel, type Workload } from '../../src/lib/workload.ts'
 import { canEdit, canRead, fail, requireRole, type Role, type User } from './access.ts'
 import type { Db, Queryable } from './db.ts'
-import type { CardInput, CardQuery, ColumnInput, NewBoardInput, ProgressNoteInput } from './validate.ts'
+import type {
+  CardInput,
+  CardQuery,
+  ColumnInput,
+  NewBoardInput,
+  ProgressNoteInput,
+  TeamMemberInput,
+} from './validate.ts'
 
 export interface ApiLabel {
   id: string
@@ -25,6 +35,8 @@ export interface ApiCard {
   priority: CardRow['priority']
   dueDate: string | null
   labels: ApiLabel[]
+  /** Team members the card is assigned to. */
+  assignees: { id: string; name: string }[]
   checklist: { id: string; text: string; done: boolean }[]
   /** 0-100, or null when the card doesn't track progress. */
   progress: number | null
@@ -47,9 +59,42 @@ export interface ApiBoard {
   title: string
   role: Role
   labels: ApiLabel[]
+  /** People cards can be assigned to; capacity is how many open cards they can take on (0 = no limit). */
+  team: TeamMember[]
   createdAt: string
   updatedAt: string
   columns: ApiColumn[]
+}
+
+export interface ApiWorkloadCard {
+  id: string
+  title: string
+  boardId: string
+  board: string
+  column: string
+  priority: CardRow['priority']
+  dueDate: string | null
+  progress: number | null
+}
+
+export interface ApiMemberLoad {
+  /** One id per board when people with the same name are joined across boards. */
+  memberIds: string[]
+  name: string
+  color: string
+  capacity: number
+  level: LoadLevel
+  openCount: number
+  overdue: number
+  dueSoon: number
+  doneCount: number
+  openCards: ApiWorkloadCard[]
+}
+
+export interface ApiWorkload {
+  boards: { id: string; title: string }[]
+  members: ApiMemberLoad[]
+  unassigned: ApiWorkloadCard[]
 }
 
 export interface ApiBoardSummary {
@@ -65,12 +110,25 @@ const labelColors = ['#e5484d', '#f76b15', '#ffc53d', '#30a46c', '#12a594', '#00
 
 type CardDbRow = CardRow & { created_at: string | number; updated_at: string | number }
 type ColumnDbRow = { id: string; title: string; wip_limit: number; position: number }
-type BoardDbRow = { id: string; title: string; labels: ApiLabel[]; created_at: string | number; updated_at: Date }
+type BoardDbRow = {
+  id: string
+  title: string
+  labels: ApiLabel[]
+  team: TeamMember[]
+  created_at: string | number
+  updated_at: Date
+}
 
 const iso = (value: string | number | Date) => new Date(value instanceof Date ? value : Number(value)).toISOString()
 
-function toApiCard(row: CardDbRow, column: { id: string; title: string }, labels: ApiLabel[]): ApiCard {
+function toApiCard(
+  row: CardDbRow,
+  column: { id: string; title: string },
+  labels: ApiLabel[],
+  team: TeamMember[],
+): ApiCard {
   const byId = new Map(labels.map((l) => [l.id, l]))
+  const people = new Map(team.map((m) => [m.id, m]))
   return {
     id: row.id,
     boardId: row.board_id,
@@ -82,6 +140,10 @@ function toApiCard(row: CardDbRow, column: { id: string; title: string }, labels
     priority: row.priority,
     dueDate: row.due_date,
     labels: row.label_ids.flatMap((id) => byId.get(id) ?? []),
+    assignees: (row.assignee_ids ?? []).flatMap((id) => {
+      const m = people.get(id)
+      return m ? [{ id: m.id, name: m.name }] : []
+    }),
     checklist: row.checklist,
     progress: row.progress ?? null,
     progressLog: (row.progress_log ?? []).map((e) => ({ ...e, at: iso(e.at) })),
@@ -95,7 +157,9 @@ const byPosition = (a: { position: number; id: string }, b: { position: number; 
 
 async function loadBoard(q: Queryable, boardId: string, role: Role): Promise<ApiBoard> {
   const [boards, columns, cards] = await Promise.all([
-    q.query<BoardDbRow>('select id, title, labels, created_at, updated_at from kanban.boards where id = $1', [boardId]),
+    q.query<BoardDbRow>('select id, title, labels, team, created_at, updated_at from kanban.boards where id = $1', [
+      boardId,
+    ]),
     q.query<ColumnDbRow>('select id, title, wip_limit, position from kanban.columns where board_id = $1', [boardId]),
     q.query<CardDbRow>('select * from kanban.cards where board_id = $1', [boardId]),
   ])
@@ -109,13 +173,14 @@ async function loadBoard(q: Queryable, boardId: string, role: Role): Promise<Api
     cards: cards.rows
       .filter((card) => card.column_id === col.id)
       .sort(byPosition)
-      .map((card, index) => ({ ...toApiCard(card, col, board.labels), position: index })),
+      .map((card, index) => ({ ...toApiCard(card, col, board.labels, board.team), position: index })),
   }))
   return {
     id: board.id,
     title: board.title,
     role,
     labels: board.labels,
+    team: board.team,
     createdAt: iso(board.created_at),
     updatedAt: iso(board.updated_at),
     columns: apiColumns,
@@ -196,6 +261,28 @@ async function resolveLabels(tx: Queryable, boardId: string, wanted: string[]): 
   }
   return ids
 }
+
+/** Team member ids for ids or names, adding a team member for each name the board doesn't have yet. */
+async function resolveAssignees(tx: Queryable, boardId: string, wanted: string[]): Promise<string[]> {
+  const { rows } = await tx.query<{ team: TeamMember[] }>('select team from kanban.boards where id = $1', [boardId])
+  const team = [...(rows[0]?.team ?? [])]
+  const ids: string[] = []
+  for (const want of wanted) {
+    let member = findMember(team, want)
+    if (!member) {
+      member = { id: randomUUID(), name: want, color: labelColors[team.length % labelColors.length], capacity: 0 }
+      team.push(member)
+    }
+    if (!ids.includes(member.id)) ids.push(member.id)
+  }
+  if (team.length !== rows[0]?.team.length) {
+    await tx.query('update kanban.boards set team = $2 where id = $1', [boardId, JSON.stringify(team)])
+  }
+  return ids
+}
+
+const findMember = (team: TeamMember[], ref: string) =>
+  team.find((m) => m.id === ref) ?? team.find((m) => m.name.toLowerCase() === ref.toLowerCase())
 
 function checklistFrom(input: { text: string; done: boolean }[], previous: CardRow['checklist'] = []) {
   // Keep the ids of items whose text is unchanged, so the app keeps them as the same items.
@@ -375,11 +462,12 @@ export async function createCard(db: Db, user: User, boardId: string, input: Car
     await lockBoard(tx, boardId)
     const column = await findColumn(tx, boardId, input.column!)
     const labelIds = await resolveLabels(tx, boardId, input.labels ?? [])
+    const assigneeIds = await resolveAssignees(tx, boardId, input.assignees ?? [])
     const now = Date.now()
     await tx.query(
       `insert into kanban.cards (id, board_id, column_id, position, title, description, label_ids, priority, due_date,
-         checklist, created_at, updated_at, progress)
-       values ($1, $2, $3, 0, $4, $5, $6, $7, $8, $9, $10, $10, $11)`,
+         checklist, created_at, updated_at, progress, assignee_ids)
+       values ($1, $2, $3, 0, $4, $5, $6, $7, $8, $9, $10, $10, $11, $12)`,
       [
         id,
         boardId,
@@ -392,6 +480,7 @@ export async function createCard(db: Db, user: User, boardId: string, input: Car
         JSON.stringify(checklistFrom(input.checklist ?? [])),
         now,
         input.progress ?? null,
+        JSON.stringify(assigneeIds),
       ],
     )
     await placeCard(tx, boardId, id, column.id, input.position)
@@ -406,9 +495,10 @@ export async function updateCard(db: Db, user: User, cardId: string, input: Card
     const { rows } = await tx.query<CardDbRow>('select * from kanban.cards where id = $1', [cardId])
     const card = rows[0]
     const labelIds = input.labels ? await resolveLabels(tx, boardId, input.labels) : card.label_ids
+    const assigneeIds = input.assignees ? await resolveAssignees(tx, boardId, input.assignees) : card.assignee_ids
     await tx.query(
       `update kanban.cards set title = $2, description = $3, priority = $4, due_date = $5, label_ids = $6,
-         checklist = $7, updated_at = $8, progress = $9
+         checklist = $7, updated_at = $8, progress = $9, assignee_ids = $10
        where id = $1`,
       [
         cardId,
@@ -420,6 +510,7 @@ export async function updateCard(db: Db, user: User, cardId: string, input: Card
         JSON.stringify(input.checklist ? checklistFrom(input.checklist, card.checklist) : card.checklist),
         Date.now(),
         input.progress === undefined ? card.progress : input.progress,
+        JSON.stringify(assigneeIds ?? []),
       ],
     )
     if (input.column !== undefined || input.position !== undefined) {
@@ -475,6 +566,12 @@ export async function findCards(db: Db, user: User, query: CardQuery): Promise<A
     where.push(`exists (select 1 from jsonb_array_elements(b.labels) l
       where (l->>'id' = ${p} or lower(l->>'name') = lower(${p})) and c.label_ids @> jsonb_build_array(l->>'id'))`)
   }
+  if (query.assignee?.toLowerCase() === 'none') where.push(`jsonb_array_length(c.assignee_ids) = 0`)
+  else if (query.assignee) {
+    const p = param(query.assignee)
+    where.push(`exists (select 1 from jsonb_array_elements(b.team) m
+      where (m->>'id' = ${p} or lower(m->>'name') = lower(${p})) and c.assignee_ids @> jsonb_build_array(m->>'id'))`)
+  }
   if (query.priority) where.push(`c.priority = ${param(query.priority)}`)
   if (query.dueFrom) where.push(`c.due_date >= ${param(query.dueFrom)}`)
   if (query.dueTo) where.push(`c.due_date <= ${param(query.dueTo)}`)
@@ -482,8 +579,8 @@ export async function findCards(db: Db, user: User, query: CardQuery): Promise<A
     const p = param(`%${query.search.replace(/[\\%_]/g, (m) => `\\${m}`)}%`)
     where.push(`(c.title ilike ${p} or c.description ilike ${p} or c.checklist::text ilike ${p} or c.progress_log::text ilike ${p})`)
   }
-  const { rows } = await db.query<CardDbRow & { column_title: string; labels: ApiLabel[] }>(
-    `select c.*, col.title as column_title, b.labels
+  const { rows } = await db.query<CardDbRow & { column_title: string; labels: ApiLabel[]; team: TeamMember[] }>(
+    `select c.*, col.title as column_title, b.labels, b.team
      from kanban.cards c
      join kanban.board_members m on m.board_id = c.board_id and m.user_id = $1
      join kanban.boards b on b.id = c.board_id
@@ -493,5 +590,114 @@ export async function findCards(db: Db, user: User, query: CardQuery): Promise<A
      limit ${param(query.limit)}`,
     params,
   )
-  return rows.map((row) => toApiCard(row, { id: row.column_id, title: row.column_title }, row.labels))
+  return rows.map((row) => toApiCard(row, { id: row.column_id, title: row.column_title }, row.labels, row.team))
+}
+
+// --- Team and workload ---
+
+/**
+ * Add a team member to a board, or change one. `member` is an id or a name;
+ * a name the board doesn't have yet adds that person.
+ */
+export async function setTeamMember(
+  db: Db,
+  user: User,
+  boardId: string,
+  member: string,
+  input: TeamMemberInput,
+): Promise<TeamMember> {
+  return db.transaction(async (tx) => {
+    await requireRole(tx, boardId, user.id, canEdit)
+    const { rows } = await tx.query<{ team: TeamMember[] }>('select team from kanban.boards where id = $1 for update', [
+      boardId,
+    ])
+    const team = [...(rows[0]?.team ?? [])]
+    const existing = findMember(team, member)
+    const name = input.name ?? existing?.name ?? member
+    const clash = team.find((m) => m !== existing && m.name.toLowerCase() === name.toLowerCase())
+    if (clash) fail(409, `${clash.name} is already on this board's team`)
+    const next: TeamMember = {
+      id: existing?.id ?? randomUUID(),
+      name,
+      color: input.color ?? existing?.color ?? labelColors[team.length % labelColors.length],
+      capacity: input.capacity ?? existing?.capacity ?? 0,
+    }
+    if (existing) team[team.indexOf(existing)] = next
+    else team.push(next)
+    await tx.query('update kanban.boards set team = $2 where id = $1', [boardId, JSON.stringify(team)])
+    return next
+  })
+}
+
+/** Take someone off a board's team and off every card they were assigned to. */
+export async function removeTeamMember(db: Db, user: User, boardId: string, member: string) {
+  await db.transaction(async (tx) => {
+    await requireRole(tx, boardId, user.id, canEdit)
+    const { rows } = await tx.query<{ team: TeamMember[] }>('select team from kanban.boards where id = $1 for update', [
+      boardId,
+    ])
+    const team = rows[0]?.team ?? []
+    const existing = findMember(team, member) ?? fail(404, `Team member "${member}" not found on this board`)
+    await tx.query('update kanban.boards set team = $2 where id = $1', [
+      boardId,
+      JSON.stringify(team.filter((m) => m.id !== existing.id)),
+    ])
+    await tx.query(
+      `update kanban.cards set assignee_ids = assignee_ids - $2::text
+       where board_id = $1 and assignee_ids @> jsonb_build_array($2::text)`,
+      [boardId, existing.id],
+    )
+  })
+}
+
+/**
+ * Who has what: each team member's open cards (not in a done column) against
+ * their capacity, on one board or across every board the user can see. Across
+ * boards, people with the same name count as one person.
+ */
+export async function getWorkload(db: Db, user: User, boardId?: string): Promise<ApiWorkload> {
+  const ids = boardId
+    ? [await requireRole(db, boardId, user.id, canRead).then(() => boardId)]
+    : (await listBoards(db, user)).map((b) => b.id)
+  const boards = await Promise.all(ids.map((id) => loadBoard(db, id, 'viewer')))
+  type Item = ApiWorkloadCard & { assigneeIds: string[] }
+  const workloads: Workload<Item>[] = boards.map((board) =>
+    computeWorkload(
+      board.team,
+      board.columns.flatMap((col) =>
+        col.cards.map((card) => ({
+          done: isDoneColumn(col.title),
+          card: {
+            id: card.id,
+            title: card.title,
+            boardId: board.id,
+            board: board.title,
+            column: col.title,
+            priority: card.priority,
+            dueDate: card.dueDate,
+            progress: card.progress,
+            assigneeIds: card.assignees.map((a) => a.id),
+          },
+        })),
+      ),
+    ),
+  )
+  const workload = boardId ? workloads[0] : mergeWorkloads(workloads)
+  const strip = ({ assigneeIds: _a, ...card }: Item): ApiWorkloadCard => card
+  return {
+    boards: boards.map((b) => ({ id: b.id, title: b.title })),
+    members: workload.members.map((m) => ({
+      memberIds: m.memberIds,
+      name: m.name,
+      color: m.color,
+      capacity: m.capacity,
+      level: loadLevel(m),
+      openCount: m.open.length,
+      overdue: m.overdue,
+      dueSoon: m.dueSoon,
+      doneCount: m.doneCount,
+      openCards: m.open.map(strip),
+    })),
+    unassigned: workload.unassigned.map(strip),
+  }
 }

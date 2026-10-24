@@ -151,7 +151,11 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
     async applyOps(boardId, ops) {
       canEdit(boardId)
       const board = server.boards.get(boardId)!
-      if (ops.board) Object.assign(board, structuredClone(ops.board))
+      if (ops.board) {
+        // Like the server: a board change without a team (from an older app) keeps the team.
+        const { team, ...rest } = structuredClone(ops.board)
+        Object.assign(board, rest, team === undefined ? {} : { team })
+      }
       for (const row of ops.upsertColumns) server.columns.set(row.id, structuredClone(row))
       for (const row of ops.upsertCards) {
         // Like the server: a row without progress (from an older app) keeps the progress already stored.
@@ -160,7 +164,8 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
           row.progress === undefined
             ? { progress: previous?.progress ?? null, progress_log: previous?.progress_log ?? [] }
             : {}
-        server.cards.set(row.id, structuredClone({ ...row, ...progress }))
+        const assignees = row.assignee_ids === undefined ? { assignee_ids: previous?.assignee_ids ?? [] } : {}
+        server.cards.set(row.id, structuredClone({ ...row, ...progress, ...assignees }))
       }
       for (const id of ops.deleteCardIds) server.cards.delete(id)
       for (const id of ops.deleteColumnIds) {

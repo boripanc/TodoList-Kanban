@@ -38,6 +38,18 @@ export function restApi(db: Db) {
     return c.json({ ok: true })
   })
 
+  api.put('/boards/:boardId/team/:member', async (c) =>
+    c.json(
+      await k.setTeamMember(db, user(c), c.req.param('boardId'), c.req.param('member'), v.teamMemberInput(await body(c))),
+    ),
+  )
+  api.delete('/boards/:boardId/team/:member', async (c) => {
+    await k.removeTeamMember(db, user(c), c.req.param('boardId'), c.req.param('member'))
+    return c.json({ ok: true })
+  })
+  api.get('/boards/:boardId/workload', async (c) => c.json(await k.getWorkload(db, user(c), c.req.param('boardId'))))
+  api.get('/workload', async (c) => c.json(await k.getWorkload(db, user(c))))
+
   api.post('/boards/:boardId/columns', async (c) =>
     c.json(await k.createColumn(db, user(c), c.req.param('boardId'), v.columnInput(await body(c), true)), 201),
   )

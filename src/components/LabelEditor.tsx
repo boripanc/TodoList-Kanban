@@ -33,9 +33,17 @@ export function NewLabelForm({ board, onCreated }: { board: Board; onCreated?: (
   )
 }
 
-export function ColorPicker({ value, onChange }: { value: string; onChange: (color: string) => void }) {
+export function ColorPicker({
+  value,
+  onChange,
+  label = 'Label color',
+}: {
+  value: string
+  onChange: (color: string) => void
+  label?: string
+}) {
   return (
-    <div className="color-picker" role="radiogroup" aria-label="Label color">
+    <div className="color-picker" role="radiogroup" aria-label={label}>
       {labelColors.map((color) => (
         <button
           key={color}

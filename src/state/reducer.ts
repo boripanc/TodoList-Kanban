@@ -1,4 +1,4 @@
-import type { AppState, Board, Card, Column, Label, Role } from '../types'
+import type { AppState, Board, Card, Column, Label, Role, TeamMember } from '../types'
 import { extractBoardDoc, type BoardDoc } from '../cloud/doc'
 import { templateColumns, templateLabels, type BoardTemplate } from './templates'
 
@@ -10,6 +10,12 @@ export type Action =
   | { type: 'label/add'; boardId: string; label: Label }
   | { type: 'label/update'; boardId: string; labelId: string; patch: Partial<Omit<Label, 'id'>> }
   | { type: 'label/delete'; boardId: string; labelId: string }
+  | { type: 'team/add'; boardId: string; member: TeamMember }
+  | { type: 'team/update'; boardId: string; memberId: string; patch: Partial<Omit<TeamMember, 'id'>> }
+  /** Remove someone from the team and from every card they were assigned to. */
+  | { type: 'team/delete'; boardId: string; memberId: string }
+  /** Assign a card to a team member, or take them off it. */
+  | { type: 'card/toggleAssignee'; cardId: string; memberId: string; now: number }
   | { type: 'column/add'; boardId: string; id: string; title: string }
   | { type: 'column/update'; columnId: string; patch: Partial<Pick<Column, 'title' | 'wipLimit'>> }
   | { type: 'column/delete'; boardId: string; columnId: string }
@@ -34,7 +40,7 @@ export type Action =
   | { type: 'cloud/clear' }
 
 export const initialState: AppState = {
-  version: 2,
+  version: 3,
   boardOrder: [],
   activeBoardId: null,
   boards: {},
@@ -80,6 +86,9 @@ function targetBoardId(state: AppState, action: Action): string | undefined {
     case 'label/add':
     case 'label/update':
     case 'label/delete':
+    case 'team/add':
+    case 'team/update':
+    case 'team/delete':
     case 'column/add':
     case 'column/delete':
     case 'column/move':
@@ -93,7 +102,8 @@ function targetBoardId(state: AppState, action: Action): string | undefined {
     case 'card/duplicate':
     case 'card/move':
     case 'card/logProgress':
-    case 'card/deleteProgress': {
+    case 'card/deleteProgress':
+    case 'card/toggleAssignee': {
       const column = findColumnOfCard(state, action.cardId)
       return column && Object.values(state.boards).find((b) => b.columnIds.includes(column.id))?.id
     }
@@ -106,6 +116,17 @@ function targetBoardId(state: AppState, action: Action): string | undefined {
 export function clampProgress(value: number | null): number | null {
   if (value === null || !Number.isFinite(value)) return null
   return Math.min(100, Math.max(0, Math.round(value)))
+}
+
+/** A whole number of open cards, 0 meaning no limit. */
+export function clampCapacity(value: number): number {
+  return Number.isFinite(value) ? Math.min(999, Math.max(0, Math.floor(value))) : 0
+}
+
+/** The board a card is on. */
+export function findBoardOfCard(state: AppState, cardId: string): Board | undefined {
+  const column = findColumnOfCard(state, cardId)
+  return column && Object.values(state.boards).find((b) => b.columnIds.includes(column.id))
 }
 
 export function isReadOnly(board: Board | undefined): boolean {
@@ -133,6 +154,7 @@ export function reducer(state: AppState, action: Action): AppState {
         title: action.title.trim() || 'Untitled board',
         columnIds,
         labels: labelSeeds.map((seed, i) => ({ ...seed, id: labelIds[i] })),
+        team: [],
         createdAt: action.now,
       }
       return {
@@ -191,6 +213,56 @@ export function reducer(state: AppState, action: Action): AppState {
       }
       const labels = board.labels.filter((label) => label.id !== action.labelId)
       return { ...state, cards, boards: { ...state.boards, [board.id]: { ...board, labels } } }
+    }
+
+    case 'team/add': {
+      const board = state.boards[action.boardId]
+      const name = action.member.name.trim()
+      if (!board || !name || board.team.some((m) => m.id === action.member.id)) return state
+      const member = { ...action.member, name, capacity: clampCapacity(action.member.capacity) }
+      return { ...state, boards: { ...state.boards, [board.id]: { ...board, team: [...board.team, member] } } }
+    }
+
+    case 'team/update': {
+      const board = state.boards[action.boardId]
+      if (!board) return state
+      const patch = { ...action.patch }
+      if (patch.name !== undefined) {
+        patch.name = patch.name.trim()
+        if (!patch.name) delete patch.name
+      }
+      if (patch.capacity !== undefined) patch.capacity = clampCapacity(patch.capacity)
+      const team = board.team.map((m) => (m.id === action.memberId ? { ...m, ...patch } : m))
+      return { ...state, boards: { ...state.boards, [board.id]: { ...board, team } } }
+    }
+
+    case 'team/delete': {
+      const board = state.boards[action.boardId]
+      if (!board) return state
+      const cards = { ...state.cards }
+      for (const columnId of board.columnIds) {
+        for (const cardId of state.columns[columnId]?.cardIds ?? []) {
+          const card = cards[cardId]
+          if (card?.assigneeIds.includes(action.memberId)) {
+            cards[cardId] = { ...card, assigneeIds: card.assigneeIds.filter((id) => id !== action.memberId) }
+          }
+        }
+      }
+      const team = board.team.filter((m) => m.id !== action.memberId)
+      return { ...state, cards, boards: { ...state.boards, [board.id]: { ...board, team } } }
+    }
+
+    case 'card/toggleAssignee': {
+      const card = state.cards[action.cardId]
+      const board = findBoardOfCard(state, action.cardId)
+      if (!card || !board) return state
+      const assigned = card.assigneeIds.includes(action.memberId)
+      // Only people on the board's team can be assigned.
+      if (!assigned && !board.team.some((m) => m.id === action.memberId)) return state
+      const assigneeIds = assigned
+        ? card.assigneeIds.filter((id) => id !== action.memberId)
+        : [...card.assigneeIds, action.memberId]
+      return { ...state, cards: { ...state.cards, [card.id]: { ...card, assigneeIds, updatedAt: action.now } } }
     }
 
     case 'column/add': {
@@ -268,6 +340,7 @@ export function reducer(state: AppState, action: Action): AppState {
         title,
         description: '',
         labelIds: [],
+        assigneeIds: [],
         priority: 'none',
         dueDate: null,
         checklist: [],
@@ -321,6 +394,7 @@ export function reducer(state: AppState, action: Action): AppState {
         id: action.newId,
         title: `${card.title} (copy)`,
         labelIds: [...card.labelIds],
+        assigneeIds: [...card.assigneeIds],
         checklist: card.checklist.map((item, i) => ({ ...item, id: `${action.newId}-${i}` })),
         // The copy is a new task: it starts without progress history.
         progress: null,

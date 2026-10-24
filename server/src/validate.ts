@@ -1,5 +1,5 @@
 import type { BoardOps, BoardRow, CardRow, ColumnRow } from '../../src/cloud/doc.ts'
-import type { ProgressEntry } from '../../src/types.ts'
+import type { ProgressEntry, TeamMember } from '../../src/types.ts'
 import type { ContactInput, CredentialField, CredentialInput } from '../../src/cloud/api.ts'
 import { credentialKinds, type CredentialKind } from '../../src/lib/credentials.ts'
 
@@ -52,12 +52,28 @@ export function labels(value: unknown): BoardRow['labels'] {
   })
 }
 
+export function team(value: unknown): TeamMember[] {
+  return arr(value, 'team', 200).map((item) => {
+    const m = obj(item, 'team member')
+    const capacity = int(m.capacity, 'capacity')
+    if (capacity < 0 || capacity > 999) throw new BadRequest('capacity must be from 0 to 999')
+    return {
+      id: id(m.id, 'team member id'),
+      name: str(m.name, 'team member name', 100),
+      color: str(m.color, 'team member color', 50),
+      capacity,
+    }
+  })
+}
+
 export function boardRow(value: unknown): BoardRow {
   const b = obj(value, 'board')
   return {
     id: id(b.id, 'board id'),
     title: str(b.title, 'title'),
     labels: labels(b.labels),
+    // Apps from before teams existed leave it out; the database then keeps what it has.
+    ...(b.team === undefined ? {} : { team: team(b.team) }),
     created_at: int(b.created_at, 'created_at'),
   }
 }
@@ -85,6 +101,10 @@ export function cardRow(value: unknown, boardId: string): CardRow {
     title: str(c.title, 'card title', 1000),
     description: str(c.description, 'description', 50_000),
     label_ids: arr(c.label_ids, 'label_ids', 200).map((l) => id(l, 'label id')),
+    // Apps from before teams existed leave it out; the database then keeps what it has.
+    ...(c.assignee_ids === undefined
+      ? {}
+      : { assignee_ids: arr(c.assignee_ids, 'assignee_ids', 200).map((a) => id(a, 'assignee id')) }),
     priority,
     due_date: c.due_date === null ? null : str(c.due_date, 'due_date', 10),
     checklist: arr(c.checklist, 'checklist', 500).map((item) => {
@@ -118,7 +138,11 @@ export function boardOps(value: unknown, boardId: string): BoardOps {
   const o = obj(value, 'changes')
   const board = o.board === undefined ? undefined : obj(o.board, 'board')
   return {
-    board: board && { title: str(board.title, 'title'), labels: labels(board.labels) },
+    board: board && {
+      title: str(board.title, 'title'),
+      labels: labels(board.labels),
+      ...(board.team === undefined ? {} : { team: team(board.team) }),
+    },
     upsertColumns: arr(o.upsertColumns ?? [], 'upsertColumns').map((c) => columnRow(c, boardId)),
     deleteColumnIds: arr(o.deleteColumnIds ?? [], 'deleteColumnIds').map((c) => id(c, 'column id')),
     upsertCards: arr(o.upsertCards ?? [], 'upsertCards', 5000).map((c) => cardRow(c, boardId)),
@@ -174,6 +198,14 @@ export interface CardInput {
   checklist?: { text: string; done: boolean }[]
   /** 0-100, or null to stop tracking. */
   progress?: number | null
+  /** Team member ids or names; unknown names join the board's team. Replaces the assignees. */
+  assignees?: string[]
+}
+
+export interface TeamMemberInput {
+  name?: string
+  color?: string
+  capacity?: number
 }
 
 export interface ProgressNoteInput {
@@ -190,6 +222,8 @@ export interface CardQuery {
   search?: string
   dueFrom?: string
   dueTo?: string
+  /** Team member id or name, or "none" for cards nobody is assigned to. */
+  assignee?: string
   limit: number
 }
 
@@ -222,8 +256,8 @@ function date(value: unknown, what: string): string {
 }
 
 const color = (value: unknown) => {
-  const s = str(value, 'label color', 50)
-  if (!/^#[0-9a-f]{6}$/i.test(s)) throw new BadRequest('label color must look like #0090ff')
+  const s = str(value, 'color', 50)
+  if (!/^#[0-9a-f]{6}$/i.test(s)) throw new BadRequest('color must look like #0090ff')
   return s
 }
 
@@ -280,6 +314,18 @@ export function cardInput(value: unknown, isNew: boolean): CardInput {
       }),
     ),
     progress: optional(c.progress, (v) => percent(v, 'progress')),
+    assignees: optional(c.assignees, (v) => arr(v, 'assignees', 200).map((a) => title(a, 'assignee', 100))),
+  }
+}
+
+export function teamMemberInput(value: unknown): TeamMemberInput {
+  const m = obj(value, 'team member')
+  const capacity = optional(m.capacity, (v) => wholeAtLeastZero(v, 'capacity'))
+  if (capacity !== undefined && capacity > 999) throw new BadRequest('capacity must be from 0 to 999')
+  return {
+    name: optional(m.name, (v) => title(v, 'name', 100)),
+    color: optional(m.color, color),
+    capacity,
   }
 }
 
@@ -305,6 +351,7 @@ export function cardQuery(value: unknown): CardQuery {
     search: optional(q.search, (v) => text(v, 'search')),
     dueFrom: optional(q.dueFrom, (v) => (v === '' ? undefined : date(v, 'dueFrom'))),
     dueTo: optional(q.dueTo, (v) => (v === '' ? undefined : date(v, 'dueTo'))),
+    assignee: optional(q.assignee, (v) => text(v, 'assignee')),
     limit: Math.min(Math.max(limit ?? 100, 1), 500),
   }
 }

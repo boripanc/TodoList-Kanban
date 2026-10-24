@@ -57,6 +57,23 @@ async function sharedSetup(role: 'editor' | 'viewer' = 'editor') {
 }
 
 describe('cloud sync', () => {
+  it('shares the team and who is assigned to each card', async () => {
+    const { ana, ben, board, firstColumn } = await sharedSetup()
+    await ana.edit(
+      { type: 'team/add', boardId: board.id, member: { id: 'm1', name: 'Kim', color: '#0090ff', capacity: 2 } },
+      { type: 'card/add', columnId: firstColumn, id: 'c1', title: 'Book flights', now },
+      { type: 'card/toggleAssignee', cardId: 'c1', memberId: 'm1', now },
+    )
+    await ben.sync.refresh(board.id)
+    expect(ben.state.boards[board.id].team).toEqual([{ id: 'm1', name: 'Kim', color: '#0090ff', capacity: 2 }])
+    expect(ben.state.cards.c1.assigneeIds).toEqual(['m1'])
+
+    await ben.edit({ type: 'team/delete', boardId: board.id, memberId: 'm1' })
+    await ana.sync.refresh(board.id)
+    expect(ana.state.boards[board.id].team).toEqual([])
+    expect(ana.state.cards.c1.assigneeIds).toEqual([])
+  })
+
   it('shares a board: the invitee loads it and both see each other’s edits', async () => {
     const { ana, ben, board, firstColumn } = await sharedSetup()
     expect(ben.state.boards[board.id]).toMatchObject({ title: 'Trip', cloud: { role: 'editor' } })

@@ -21,6 +21,7 @@ const pathParam = (name: string, description: string) => ({
 const boardId = pathParam('boardId', 'Board id')
 const column = pathParam('column', 'Column id or title')
 const cardId = pathParam('cardId', 'Card id')
+const member = pathParam('member', 'Team member id or name')
 const query = (name: string, description: string, schema: object = { type: 'string' }) => ({
   name,
   in: 'query',
@@ -37,6 +38,7 @@ const cardFilters = [
   query('search', 'Text in the title, notes or checklist'),
   query('dueFrom', 'Due on or after (YYYY-MM-DD)', date),
   query('dueTo', 'Due on or before (YYYY-MM-DD)', date),
+  query('assignee', 'Team member name or id, or "none" for unassigned cards'),
   query('limit', 'Most cards to return (1-500, default 100)', { type: 'integer', minimum: 1, maximum: 500 }),
 ]
 const cardFields = {
@@ -60,6 +62,11 @@ const cardFields = {
     },
   },
   progress: { type: 'integer', minimum: 0, maximum: 100, nullable: true, description: 'Percent done; null stops tracking' },
+  assignees: {
+    type: 'array',
+    items: { type: 'string' },
+    description: 'Team member names or ids; names the team does not have yet join it. Replaces the assignees.',
+  },
   column: { type: 'string', description: 'Column id or title' },
   position: { type: 'integer', minimum: 0, description: '0 = top of the column; default the bottom' },
 }
@@ -113,6 +120,45 @@ export function openApiSpec() {
           responses: { 200: json(ref('Board')), ...errors },
         },
         delete: { summary: 'Delete a board (owner only)', operationId: 'deleteBoard', responses: { 200: ok, ...errors } },
+      },
+      '/boards/{boardId}/team/{member}': {
+        parameters: [boardId, member],
+        put: {
+          summary: 'Add or change a team member',
+          description: 'An unknown name adds that person. Fields left out stay as they are.',
+          operationId: 'setTeamMember',
+          requestBody: body({
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'New name (to rename)' },
+              color: { type: 'string', example: '#0090ff' },
+              capacity: { type: 'integer', minimum: 0, maximum: 999, description: 'Open cards they can take on; 0 = no limit' },
+            },
+          }),
+          responses: { 200: json(ref('TeamMember')), ...errors },
+        },
+        delete: {
+          summary: 'Remove a team member',
+          description: 'Also takes them off every card on the board.',
+          operationId: 'removeTeamMember',
+          responses: { 200: ok, ...errors },
+        },
+      },
+      '/boards/{boardId}/workload': {
+        parameters: [boardId],
+        get: {
+          summary: "Each team member's open cards and load on this board",
+          operationId: 'getBoardWorkload',
+          responses: { 200: json(ref('Workload')), ...errors },
+        },
+      },
+      '/workload': {
+        get: {
+          summary: 'Workload across all your boards',
+          description: 'People with the same name on different boards count as one person; capacities add up.',
+          operationId: 'getWorkload',
+          responses: { 200: json(ref('Workload')), ...errors },
+        },
       },
       '/boards/{boardId}/columns': {
         parameters: [boardId],
@@ -212,6 +258,56 @@ export function openApiSpec() {
         User: { type: 'object', properties: { id: { type: 'string' }, email: { type: 'string' } } },
         Role: { type: 'string', enum: ['owner', 'editor', 'viewer'] },
         Label: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, color: { type: 'string' } } },
+        TeamMember: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            name: { type: 'string' },
+            color: { type: 'string' },
+            capacity: { type: 'integer', description: 'Open cards they can take on; 0 = no limit' },
+          },
+        },
+        WorkloadCard: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            title: { type: 'string' },
+            boardId: { type: 'string' },
+            board: { type: 'string' },
+            column: { type: 'string' },
+            priority,
+            dueDate: { ...date, nullable: true },
+            progress: { type: 'integer', nullable: true },
+          },
+        },
+        Workload: {
+          type: 'object',
+          properties: {
+            boards: {
+              type: 'array',
+              items: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' } } },
+            },
+            members: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  memberIds: { type: 'array', items: { type: 'string' } },
+                  name: { type: 'string' },
+                  color: { type: 'string' },
+                  capacity: { type: 'integer' },
+                  level: { type: 'string', enum: ['free', 'busy', 'full', 'over'] },
+                  openCount: { type: 'integer', description: 'Assigned cards not in a done column' },
+                  overdue: { type: 'integer' },
+                  dueSoon: { type: 'integer', description: 'Open cards due within 7 days' },
+                  doneCount: { type: 'integer' },
+                  openCards: { type: 'array', items: ref('WorkloadCard') },
+                },
+              },
+            },
+            unassigned: { type: 'array', items: ref('WorkloadCard'), description: 'Open cards nobody is assigned to' },
+          },
+        },
         BoardSummary: {
           type: 'object',
           properties: {
@@ -229,6 +325,7 @@ export function openApiSpec() {
             title: { type: 'string' },
             role: ref('Role'),
             labels: { type: 'array', items: ref('Label') },
+            team: { type: 'array', items: ref('TeamMember') },
             createdAt: { type: 'string', format: 'date-time' },
             updatedAt: { type: 'string', format: 'date-time' },
             columns: { type: 'array', items: ref('Column') },
@@ -257,6 +354,10 @@ export function openApiSpec() {
             priority,
             dueDate: { ...date, nullable: true },
             labels: { type: 'array', items: ref('Label') },
+            assignees: {
+              type: 'array',
+              items: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } } },
+            },
             checklist: {
               type: 'array',
               items: { type: 'object', properties: { id: { type: 'string' }, text: { type: 'string' }, done: { type: 'boolean' } } },

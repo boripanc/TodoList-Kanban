@@ -61,6 +61,13 @@ const progress = {
   maximum: 100,
   description: 'How far along the task is, 0-100 percent; null stops tracking progress.',
 }
+const assignees = {
+  type: 'array',
+  items: { type: 'string' },
+  description:
+    'Team member names or ids the card is assigned to. Names the board team does not have yet join the team. Replaces the assignees; [] unassigns everyone.',
+}
+const member = text('Team member name or id, from get_board (team).')
 const cardFields = {
   title: text('Card title.'),
   description: text('Notes (plain text).'),
@@ -69,6 +76,7 @@ const cardFields = {
   labels,
   checklist,
   progress,
+  assignees,
 }
 
 export const tools: Tool[] = [
@@ -83,7 +91,7 @@ export const tools: Tool[] = [
   {
     name: 'get_board',
     title: 'Get a board',
-    description: 'Get a board with its labels, its columns in order and every card in each column.',
+    description: 'Get a board with its labels, its team, its columns in order and every card in each column.',
     inputSchema: object({ boardId }, ['boardId']),
     annotations: { readOnlyHint: true },
     run: (db, user, a) => k.getBoard(db, user, v.ref(a.boardId, 'boardId')),
@@ -166,6 +174,7 @@ export const tools: Tool[] = [
       search: text('Text in the title, notes, checklist or progress updates.'),
       dueFrom: text('Due on or after this date, YYYY-MM-DD.'),
       dueTo: text('Due on or before this date, YYYY-MM-DD. Use today for overdue and due today.'),
+      assignee: text('Only cards assigned to this team member (name or id), or "none" for unassigned cards.'),
       limit: { type: 'integer', minimum: 1, maximum: 500, description: 'Most cards to return (default 100).' },
     }),
     annotations: { readOnlyHint: true },
@@ -231,6 +240,47 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: 'get_workload',
+    title: 'Get team workload',
+    description:
+      'Who has what: each team member with their open cards (cards not in a done column), counts of overdue and soon-due cards, and load against their capacity (level: free, busy, full or over). Also lists open cards nobody is assigned to. Without boardId, covers every board you can see and joins people with the same name.',
+    inputSchema: object({ boardId: text('Only this board (optional).') }),
+    annotations: { readOnlyHint: true },
+    run: (db, user, a) => k.getWorkload(db, user, a.boardId === undefined ? undefined : v.ref(a.boardId, 'boardId')),
+  },
+  {
+    name: 'set_team_member',
+    title: 'Add or change a team member',
+    description:
+      'Add someone to a board team, or change their name, color or capacity (how many open cards they can take on; 0 = no limit). An unknown name adds that person.',
+    inputSchema: object(
+      {
+        boardId,
+        member,
+        name: text('New name (to rename).'),
+        color: text('Hex color like #0090ff.'),
+        capacity: { type: 'integer', minimum: 0, maximum: 999, description: 'Open cards they can take on; 0 = no limit.' },
+      },
+      ['boardId', 'member'],
+    ),
+    annotations: { idempotentHint: true },
+    run: (db, user, a) => {
+      const { boardId: id, member: who, ...rest } = a
+      return k.setTeamMember(db, user, v.ref(id, 'boardId'), v.ref(who, 'member'), v.teamMemberInput(rest))
+    },
+  },
+  {
+    name: 'remove_team_member',
+    title: 'Remove a team member',
+    description: 'Take someone off a board team. They are also taken off every card on that board.',
+    inputSchema: object({ boardId, member }, ['boardId', 'member']),
+    annotations: { destructiveHint: true },
+    run: async (db, user, a) => {
+      await k.removeTeamMember(db, user, v.ref(a.boardId, 'boardId'), v.ref(a.member, 'member'))
+      return { ok: true }
+    },
+  },
+  {
     name: 'delete_card',
     title: 'Delete a card',
     description: 'Delete a card for good.',
@@ -245,7 +295,8 @@ export const tools: Tool[] = [
 
 const INSTRUCTIONS =
   'TodoList Kanban boards. Start with list_boards, then get_board to see columns and cards. ' +
-  'Columns can be named by title. You act as the owner of the API key: viewers can only read.'
+  'Columns can be named by title. Cards can be assigned to the board team by name; get_workload shows who has what. ' +
+  'You act as the owner of the API key: viewers can only read.'
 
 type Message = { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown }
 

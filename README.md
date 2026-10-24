@@ -7,6 +7,7 @@ A kanban board for work and daily life. It works in the browser with no account,
 - **Boards**: as many as you like, created from a Work, Daily life or Blank template; rename, delete and switch between them.
 - **Columns**: add, rename (double-click the title), reorder by dragging, delete, clear, and an optional work-in-progress limit that turns the count red when exceeded.
 - **Cards**: quick add, drag within and across columns (mouse, touch press-and-hold, or keyboard), and a detail dialog for title, notes, labels, priority, due date, checklist, duplicate and delete.
+- **Team and workload**: each board has a team (name, color and capacity, the number of open cards someone can take on). Assign cards to one or more people from the card dialog; their avatars show on the card. Filter the board by assignee or unassigned cards, and open **Team** (or press `W`) to see each person's open, overdue and soon-due cards against their capacity, for this board or across all boards. On account boards, people with access can be added to the team in one click.
 - **Labels**: per-board, with colors; manage them from the board menu or create them right in a card.
 - **Due dates**: cards show Overdue, Today and Soon at a glance.
 - **Search and filter**: full-text search over titles, notes and checklists, plus filters by label, priority and due date.
@@ -15,7 +16,7 @@ A kanban board for work and daily life. It works in the browser with no account,
 - **Accounts and sharing** (optional, with your own Postgres): sign in with an email and password, keep boards in your account on every device, invite people by email or with a link as editors or viewers, accept or decline invitations, change roles, remove people or leave a board. Shared boards update live.
 - **Contacts and credentials** (with accounts): a personal address book, and a vault for logins, API keys, bearer tokens, OAuth clients, SSH keys, certificates, database and cloud keys, two-factor secrets or any custom fields. Secret values are encrypted on the server and masked in the app.
 - **Automation** (with accounts): API keys, a REST API and an MCP server, so n8n, scripts and AI agents can manage boards. Claude connects with a sign-in, no key needed.
-- **Keyboard shortcuts**: `/` search, `N` new card, `F` filters, `Enter` open card, `Space` pick up and drop, `?` list them all.
+- **Keyboard shortcuts**: `/` search, `N` new card, `F` filters, `W` team and workload, `Enter` open card, `Space` pick up and drop, `?` list them all.
 
 ## Getting started
 
@@ -75,7 +76,7 @@ With accounts on, other tools can manage boards for you. Each person creates the
 Send the key in an `X-API-Key: kbn_...` header (`Authorization: Bearer kbn_...` works too) to either of these:
 
 - **REST API** at `/api/v1`, described by `/api/v1/openapi.json` (OpenAPI 3).
-- **MCP server** at `/api/mcp` (Streamable HTTP), for AI agents. Tools: `list_boards`, `get_board`, `create_board`, `rename_board`, `add_column`, `update_column`, `delete_column`, `find_cards`, `get_card`, `create_card`, `update_card`, `move_card`, `delete_card`. Deleting a whole board is left to the REST API and the app.
+- **MCP server** at `/api/mcp` (Streamable HTTP), for AI agents. Tools: `list_boards`, `get_board`, `create_board`, `rename_board`, `add_column`, `update_column`, `delete_column`, `find_cards`, `get_card`, `create_card`, `update_card`, `move_card`, `add_progress_note`, `delete_card`, `get_workload`, `set_team_member`, `remove_team_member`. Deleting a whole board is left to the REST API and the app.
 
 | Request | What it does |
 | --- | --- |
@@ -86,10 +87,12 @@ Send the key in an `X-API-Key: kbn_...` header (`Authorization: Bearer kbn_...` 
 | `POST /api/v1/boards/{boardId}/columns` | Add a column: `{"title": "Waiting", "position": 1}` |
 | `PATCH` / `DELETE /api/v1/boards/{boardId}/columns/{column}` | Rename, set the WIP limit or move a column; delete it with its cards. `{column}` is an id or a title |
 | `POST /api/v1/boards/{boardId}/cards` | Add a card: `{"column": "To do", "title": "Call the bank", "priority": "high", "dueDate": "2026-12-01", "labels": ["Finance"], "checklist": ["Find the papers"]}` |
-| `GET /api/v1/cards?search=&label=&priority=&column=&dueFrom=&dueTo=&boardId=&limit=` | Find cards on all your boards |
-| `GET` / `PATCH` / `DELETE /api/v1/cards/{cardId}` | Read, change or delete a card. `PATCH {"column": "Done"}` moves it; fields you leave out stay as they are |
+| `GET /api/v1/cards?search=&label=&assignee=&priority=&column=&dueFrom=&dueTo=&boardId=&limit=` | Find cards on all your boards. `assignee=none` finds unassigned cards |
+| `GET` / `PATCH` / `DELETE /api/v1/cards/{cardId}` | Read, change or delete a card. `PATCH {"column": "Done"}` moves it, `PATCH {"assignees": ["Kim"]}` assigns it; fields you leave out stay as they are |
+| `PUT` / `DELETE /api/v1/boards/{boardId}/team/{member}` | Add or change a team member: `{"capacity": 3}`; remove them (also from their cards). `{member}` is an id or a name |
+| `GET /api/v1/boards/{boardId}/workload`, `GET /api/v1/workload` | Each team member's open cards, overdue and soon-due counts and load against capacity, plus unassigned cards; on one board or all of them |
 
-Columns can be named by title (any case), labels by name; a label name the board doesn't have yet becomes a new label. Positions start at 0 (top or left); leaving `position` out puts the item at the end. Changes appear live in the app for everyone on the board.
+Columns can be named by title (any case), labels and team members by name; a label or assignee name the board doesn't have yet becomes a new label or team member. Positions start at 0 (top or left); leaving `position` out puts the item at the end. Changes appear live in the app for everyone on the board.
 
 ### Claude (custom connector)
 

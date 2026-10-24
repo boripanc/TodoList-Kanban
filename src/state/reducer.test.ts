@@ -213,6 +213,75 @@ describe('labels', () => {
   })
 })
 
+describe('team', () => {
+  const ana = { id: 'ana', name: 'Ana', color: '#0090ff', capacity: 3 }
+  const ben = { id: 'ben', name: 'Ben', color: '#d6409f', capacity: 0 }
+
+  function teamBoard() {
+    const { state, board } = workBoard()
+    return {
+      board,
+      state: run(
+        state,
+        { type: 'team/add', boardId: board.id, member: ana },
+        { type: 'team/add', boardId: board.id, member: ben },
+        { type: 'card/add', columnId: board.columnIds[0], id: 'c', title: 'Task', now },
+      ),
+    }
+  }
+
+  it('starts a new board and card with nobody on them', () => {
+    const { state, board } = workBoard()
+    const next = run(state, { type: 'card/add', columnId: board.columnIds[0], id: 'c', title: 'Task', now })
+    expect(next.boards[board.id].team).toEqual([])
+    expect(next.cards.c.assigneeIds).toEqual([])
+  })
+
+  it('adds, renames and limits team members, refusing blank names and duplicate ids', () => {
+    let { state, board } = teamBoard()
+    expect(state.boards[board.id].team.map((m) => m.name)).toEqual(['Ana', 'Ben'])
+    state = run(
+      state,
+      { type: 'team/add', boardId: board.id, member: { ...ana, name: 'Again' } },
+      { type: 'team/add', boardId: board.id, member: { ...ana, id: 'x', name: '   ' } },
+      { type: 'team/update', boardId: board.id, memberId: 'ana', patch: { name: '  Ana Lee ', capacity: 4.7 } },
+      { type: 'team/update', boardId: board.id, memberId: 'ben', patch: { name: ' ', capacity: -2 } },
+    )
+    expect(state.boards[board.id].team).toEqual([
+      { ...ana, name: 'Ana Lee', capacity: 4 },
+      { ...ben, capacity: 0 },
+    ])
+  })
+
+  it('assigns a card to several people and takes them off again', () => {
+    let { state } = teamBoard()
+    state = run(
+      state,
+      { type: 'card/toggleAssignee', cardId: 'c', memberId: 'ana', now: now + 1 },
+      { type: 'card/toggleAssignee', cardId: 'c', memberId: 'ben', now: now + 2 },
+    )
+    expect(state.cards.c.assigneeIds).toEqual(['ana', 'ben'])
+    expect(state.cards.c.updatedAt).toBe(now + 2)
+    state = reducer(state, { type: 'card/toggleAssignee', cardId: 'c', memberId: 'ana', now })
+    expect(state.cards.c.assigneeIds).toEqual(['ben'])
+    // Someone who isn't on the board's team can't be assigned.
+    expect(reducer(state, { type: 'card/toggleAssignee', cardId: 'c', memberId: 'zoe', now })).toBe(state)
+  })
+
+  it('removes a deleted team member from every card', () => {
+    let { state, board } = teamBoard()
+    state = run(
+      state,
+      { type: 'card/update', cardId: 'c', patch: { assigneeIds: ['ana', 'ben'] }, now },
+      { type: 'card/duplicate', cardId: 'c', newId: 'd', now },
+      { type: 'team/delete', boardId: board.id, memberId: 'ana' },
+    )
+    expect(state.cards.c.assigneeIds).toEqual(['ben'])
+    expect(state.cards.d.assigneeIds).toEqual(['ben'])
+    expect(state.boards[board.id].team.map((m) => m.id)).toEqual(['ben'])
+  })
+})
+
 describe('shared boards', () => {
   function sharedBoard(role: 'owner' | 'editor' | 'viewer') {
     const { state, board } = workBoard()
@@ -252,6 +321,8 @@ describe('shared boards', () => {
       { type: 'card/logProgress', cardId: 'c1', id: 'p1', text: 'Done', progress: 100 },
       { type: 'card/deleteProgress', cardId: 'c1', entryId: 'p1' },
       { type: 'label/delete', boardId: board.id, labelId: board.labels[0].id },
+      { type: 'team/add', boardId: board.id, member: { id: 'm', name: 'Me', color: '#000000', capacity: 0 } },
+      { type: 'card/toggleAssignee', cardId: 'c1', memberId: 'm' },
     ].map((a) => ({ now, ...a }) as Action)
     for (const action of attempts) expect(reducer(state, action)).toBe(state)
     expect(reducer(state, { type: 'board/select', boardId: board.id }).activeBoardId).toBe(board.id)
