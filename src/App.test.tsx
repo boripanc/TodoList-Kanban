@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
 import { StoreProvider } from './state/store'
@@ -81,6 +81,43 @@ describe('App', () => {
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.getByText('Plan Q4 sprint')).toBeInTheDocument()
+  })
+
+  it('asks for a start and end date on Project cards and shows the range on the card', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    await user.click(screen.getByText('Fix login timeout'))
+    let dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByLabelText('Due date')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument()
+
+    await user.type(within(dialog).getByLabelText('New label name'), 'Project{Enter}')
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('Project cards need a start date.')
+    expect(within(dialog).getByLabelText('End date (required)')).toBeRequired()
+    const start = within(dialog).getByLabelText('Start date (required)')
+    expect(start).toBeInvalid()
+
+    // Turning the label back on takes you to the start date.
+    const chip = within(dialog).getByRole('button', { name: 'Project', pressed: true })
+    await user.click(chip)
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Project', pressed: false }))
+    expect(start).toHaveFocus()
+
+    await user.keyboard('{Escape}')
+    const card = screen.getByText('Fix login timeout').closest('.card') as HTMLElement
+    expect(within(card).getByText(/Needs dates/)).toBeInTheDocument()
+
+    await user.click(screen.getByText('Fix login timeout'))
+    dialog = screen.getByRole('dialog')
+    const end = within(dialog).getByLabelText('End date (required)') as HTMLInputElement
+    fireEvent.change(within(dialog).getByLabelText('Start date (required)'), { target: { value: '2030-01-01' } })
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('The start date is after the end date.')
+    fireEvent.change(end, { target: { value: '2030-02-15' } })
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(within(card).queryByText(/Needs dates/)).not.toBeInTheDocument()
+    expect(within(card).getByTitle('2030-01-01 to 2030-02-15')).toHaveTextContent('Jan 1, 2030 – Feb 15, 2030')
   })
 
   it('tracks a card’s progress and logs progress updates', async () => {
@@ -246,7 +283,7 @@ describe('storage', () => {
     )
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 1, cards }))
     const state = loadState()
-    expect(state.version).toBe(3)
+    expect(state.version).toBe(4)
     expect(Object.keys(state.cards)).toEqual(Object.keys(saved.cards))
     for (const card of Object.values(state.cards)) expect(card.progressLog).toEqual([])
   })
@@ -259,9 +296,18 @@ describe('storage', () => {
     const boards = Object.fromEntries(Object.entries(saved.boards).map(([id, { team: _t, ...board }]) => [id, board]))
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 2, boards, cards }))
     const state = loadState()
-    expect(state.version).toBe(3)
+    expect(state.version).toBe(4)
     for (const board of Object.values(state.boards)) expect(board.team).toEqual([])
     for (const card of Object.values(state.cards)) expect(card.assigneeIds).toEqual([])
+  })
+
+  it('upgrades cards saved before start dates existed', () => {
+    const saved = createSampleState()
+    const cards = Object.fromEntries(Object.entries(saved.cards).map(([id, { startDate: _s, ...card }]) => [id, card]))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 3, cards }))
+    const state = loadState()
+    expect(state.version).toBe(4)
+    for (const card of Object.values(state.cards)) expect(card.startDate).toBeNull()
   })
 })
 

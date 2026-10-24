@@ -458,6 +458,28 @@ h2 {
 small.due-hint {
   background: none;
 }
+small.due-hint.due-overdue {
+  color: var(--danger);
+}
+/* R4C and Project cards without a start or end date. */
+.date-missing {
+  color: var(--warn);
+  border: 1px dashed currentColor;
+  font-weight: 600;
+}
+small.date-warning {
+  display: block;
+  margin-top: 4px;
+  color: var(--warn);
+  font-weight: 600;
+}
+.required-mark {
+  color: var(--muted);
+  font-weight: 400;
+}
+input[aria-invalid='true'] {
+  border-color: var(--warn);
+}
 
 .add-card,
 .add-column-button {

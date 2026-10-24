@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Card, Label, TeamMember } from '../types'
-import { dueStatus, formatDue } from '../lib/dates'
+import { dueStatus } from '../lib/dates'
+import { formatSchedule, scheduleProblem } from '../lib/schedule'
 import { priorityLabel } from '../lib/priority'
 import { isExpanded, setExpanded, type ExpandablePart } from '../lib/expanded'
 import { useStore } from '../state/context'
@@ -119,7 +120,12 @@ export function CardView({
 }: CardViewProps) {
   const cardLabels = labels.filter((label) => card.labelIds.includes(label.id))
   const doneCount = card.checklist.filter((item) => item.done).length
-  const status = card.dueDate ? dueStatus(card.dueDate) : null
+  const status = card.dueDate ? dueStatus(card.dueDate) : 'later'
+  const schedule = formatSchedule(card)
+  const dateProblem = scheduleProblem(
+    card,
+    cardLabels.map((l) => l.name),
+  )
   const checklistDone = card.checklist.length > 0 && doneCount === card.checklist.length
   const assignees = card.assigneeIds.flatMap((id) => team.find((m) => m.id === id) ?? [])
 
@@ -136,7 +142,8 @@ export function CardView({
       )}
       <div className="card-title">{card.title}</div>
       {(card.priority !== 'none' ||
-        card.dueDate ||
+        schedule ||
+        dateProblem ||
         card.checklist.length > 0 ||
         card.description ||
         assignees.length > 0) && (
@@ -146,9 +153,23 @@ export function CardView({
               {priorityLabel[card.priority]}
             </span>
           )}
-          {card.dueDate && (
-            <span className={`badge due-${status}`} title={`Due ${card.dueDate}`}>
-              📅 {formatDue(card.dueDate)}
+          {schedule && (
+            <span
+              className={`badge due-${status}`}
+              title={
+                card.startDate && card.dueDate
+                  ? `${card.startDate} to ${card.dueDate}`
+                  : card.startDate
+                    ? `Starts ${card.startDate}`
+                    : `Due ${card.dueDate}`
+              }
+            >
+              📅 {schedule}
+            </span>
+          )}
+          {dateProblem && (
+            <span className="badge date-missing" title={dateProblem} aria-label={dateProblem}>
+              ⚠ {card.startDate && card.dueDate ? 'Check dates' : 'Needs dates'}
             </span>
           )}
           {card.checklist.length > 0 &&

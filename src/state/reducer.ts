@@ -40,7 +40,7 @@ export type Action =
   | { type: 'cloud/clear' }
 
 export const initialState: AppState = {
-  version: 3,
+  version: 4,
   boardOrder: [],
   activeBoardId: null,
   boards: {},
@@ -342,6 +342,7 @@ export function reducer(state: AppState, action: Action): AppState {
         labelIds: [],
         assigneeIds: [],
         priority: 'none',
+        startDate: null,
         dueDate: null,
         checklist: [],
         progress: null,

@@ -36,9 +36,15 @@ const boardId = text('Board id, from list_boards.')
 const cardId = text('Card id, from get_board or find_cards.')
 const column = text('Column id or column title, e.g. "Done".')
 const priority = { type: 'string', enum: ['none', 'low', 'medium', 'high', 'urgent'] }
+const startDate = {
+  type: ['string', 'null'],
+  description:
+    'Start date as YYYY-MM-DD; null or "" clears it. Cards labelled R4C or Project need both startDate and dueDate.',
+}
 const dueDate = {
   type: ['string', 'null'],
-  description: 'Due date as YYYY-MM-DD; null or "" clears it.',
+  description:
+    'Due date (the end date) as YYYY-MM-DD; null or "" clears it. Cards labelled R4C or Project need both startDate and dueDate.',
 }
 const labels = {
   type: 'array',
@@ -72,6 +78,7 @@ const cardFields = {
   title: text('Card title.'),
   description: text('Notes (plain text).'),
   priority,
+  startDate,
   dueDate,
   labels,
   checklist,

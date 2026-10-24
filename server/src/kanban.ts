@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto'
 import type { CardRow } from '../../src/cloud/doc.ts'
 import type { TeamMember } from '../../src/types.ts'
 import { isDoneColumn } from '../../src/lib/done.ts'
+import { scheduleProblem } from '../../src/lib/schedule.ts'
 import { computeWorkload, loadLevel, mergeWorkloads, type LoadLevel, type Workload } from '../../src/lib/workload.ts'
 import { canEdit, canRead, fail, requireRole, type Role, type User } from './access.ts'
 import type { Db, Queryable } from './db.ts'
@@ -33,6 +34,9 @@ export interface ApiCard {
   title: string
   description: string
   priority: CardRow['priority']
+  /** When work starts (YYYY-MM-DD). */
+  startDate: string | null
+  /** When it is due: the end date (YYYY-MM-DD). */
   dueDate: string | null
   labels: ApiLabel[]
   /** Team members the card is assigned to. */
@@ -138,6 +142,7 @@ function toApiCard(
     title: row.title,
     description: row.description,
     priority: row.priority,
+    startDate: row.start_date ?? null,
     dueDate: row.due_date,
     labels: row.label_ids.flatMap((id) => byId.get(id) ?? []),
     assignees: (row.assignee_ids ?? []).flatMap((id) => {
@@ -463,11 +468,12 @@ export async function createCard(db: Db, user: User, boardId: string, input: Car
     const column = await findColumn(tx, boardId, input.column!)
     const labelIds = await resolveLabels(tx, boardId, input.labels ?? [])
     const assigneeIds = await resolveAssignees(tx, boardId, input.assignees ?? [])
+    await checkSchedule(tx, boardId, labelIds, { startDate: input.startDate ?? null, dueDate: input.dueDate ?? null })
     const now = Date.now()
     await tx.query(
       `insert into kanban.cards (id, board_id, column_id, position, title, description, label_ids, priority, due_date,
-         checklist, created_at, updated_at, progress, assignee_ids)
-       values ($1, $2, $3, 0, $4, $5, $6, $7, $8, $9, $10, $10, $11, $12)`,
+         checklist, created_at, updated_at, progress, assignee_ids, start_date)
+       values ($1, $2, $3, 0, $4, $5, $6, $7, $8, $9, $10, $10, $11, $12, $13)`,
       [
         id,
         boardId,
@@ -481,6 +487,7 @@ export async function createCard(db: Db, user: User, boardId: string, input: Car
         now,
         input.progress ?? null,
         JSON.stringify(assigneeIds),
+        input.startDate ?? null,
       ],
     )
     await placeCard(tx, boardId, id, column.id, input.position)
@@ -496,21 +503,27 @@ export async function updateCard(db: Db, user: User, cardId: string, input: Card
     const card = rows[0]
     const labelIds = input.labels ? await resolveLabels(tx, boardId, input.labels) : card.label_ids
     const assigneeIds = input.assignees ? await resolveAssignees(tx, boardId, input.assignees) : card.assignee_ids
+    const startDate = input.startDate === undefined ? (card.start_date ?? null) : input.startDate
+    const dueDate = input.dueDate === undefined ? card.due_date : input.dueDate
+    // Only changes to labels or dates are checked, so older cards can still be moved and renamed.
+    if (input.labels || input.startDate !== undefined || input.dueDate !== undefined)
+      await checkSchedule(tx, boardId, labelIds, { startDate, dueDate })
     await tx.query(
       `update kanban.cards set title = $2, description = $3, priority = $4, due_date = $5, label_ids = $6,
-         checklist = $7, updated_at = $8, progress = $9, assignee_ids = $10
+         checklist = $7, updated_at = $8, progress = $9, assignee_ids = $10, start_date = $11
        where id = $1`,
       [
         cardId,
         input.title ?? card.title,
         input.description ?? card.description,
         input.priority ?? card.priority,
-        input.dueDate === undefined ? card.due_date : input.dueDate,
+        dueDate,
         JSON.stringify(labelIds),
         JSON.stringify(input.checklist ? checklistFrom(input.checklist, card.checklist) : card.checklist),
         Date.now(),
         input.progress === undefined ? card.progress : input.progress,
         JSON.stringify(assigneeIds ?? []),
+        startDate,
       ],
     )
     if (input.column !== undefined || input.position !== undefined) {
@@ -521,6 +534,19 @@ export async function updateCard(db: Db, user: User, cardId: string, input: Card
     return boardId
   })
   return cardOf(db, boardId, cardId)
+}
+
+/** Refuse dates that don't fit the card's labels: R4C and Project cards need a start and an end date. */
+async function checkSchedule(
+  q: Queryable,
+  boardId: string,
+  labelIds: string[],
+  dates: { startDate: string | null; dueDate: string | null },
+) {
+  const { rows } = await q.query<{ labels: ApiLabel[] }>('select labels from kanban.boards where id = $1', [boardId])
+  const names = (rows[0]?.labels ?? []).filter((l) => labelIds.includes(l.id)).map((l) => l.name)
+  const problem = scheduleProblem(dates, names)
+  if (problem) fail(400, `${problem} Give startDate and dueDate (the end date) as YYYY-MM-DD.`)
 }
 
 /** Add a progress update to a card; a given progress also becomes the card's progress. */

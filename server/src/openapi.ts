@@ -45,7 +45,16 @@ const cardFields = {
   title: { type: 'string' },
   description: { type: 'string', description: 'Notes' },
   priority,
-  dueDate: { ...date, nullable: true, description: 'null or "" clears it' },
+  startDate: {
+    ...date,
+    nullable: true,
+    description: 'When work starts; null or "" clears it. Cards labelled R4C or Project need both startDate and dueDate.',
+  },
+  dueDate: {
+    ...date,
+    nullable: true,
+    description: 'The end date; null or "" clears it. Cards labelled R4C or Project need both startDate and dueDate.',
+  },
   labels: {
     type: 'array',
     items: { type: 'string' },
@@ -352,7 +361,8 @@ export function openApiSpec() {
             title: { type: 'string' },
             description: { type: 'string' },
             priority,
-            dueDate: { ...date, nullable: true },
+            startDate: { ...date, nullable: true },
+            dueDate: { ...date, nullable: true, description: 'The end date' },
             labels: { type: 'array', items: ref('Label') },
             assignees: {
               type: 'array',
