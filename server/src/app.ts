@@ -356,8 +356,8 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
     for (const card of cards) {
       const { rows } = await q.query(
         `insert into kanban.cards (id, board_id, column_id, position, title, description, label_ids, priority,
-           due_date, checklist, created_at, updated_at, progress, progress_log, assignee_ids)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $16)
+           due_date, checklist, created_at, updated_at, progress, progress_log, assignee_ids, start_date)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $16, $18)
          on conflict (id) do update set column_id = excluded.column_id, position = excluded.position,
            title = excluded.title, description = excluded.description, label_ids = excluded.label_ids,
            priority = excluded.priority, due_date = excluded.due_date, checklist = excluded.checklist,
@@ -366,7 +366,9 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
            progress = case when $15::boolean then excluded.progress else kanban.cards.progress end,
            progress_log = case when $15::boolean then excluded.progress_log else kanban.cards.progress_log end,
            -- Same for assignees, from apps before teams existed.
-           assignee_ids = case when $17::boolean then excluded.assignee_ids else kanban.cards.assignee_ids end
+           assignee_ids = case when $17::boolean then excluded.assignee_ids else kanban.cards.assignee_ids end,
+           -- And start dates, from apps before they existed.
+           start_date = case when $19::boolean then excluded.start_date else kanban.cards.start_date end
          where kanban.cards.board_id = excluded.board_id
          returning id`,
         [
@@ -387,6 +389,8 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
           card.progress !== undefined,
           JSON.stringify(card.assignee_ids ?? []),
           card.assignee_ids !== undefined,
+          card.start_date ?? null,
+          card.start_date !== undefined,
         ],
       )
       if (!rows[0]) fail(409, 'That card id is already in use')

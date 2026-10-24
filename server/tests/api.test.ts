@@ -224,6 +224,27 @@ describe('boards', () => {
     expect(bad.data.error).toMatch(/progress/)
   })
 
+  it('syncs card start dates, and keeps them when an older app leaves them out', async () => {
+    const ana = await ownerWithBoard()
+    await ana.call('POST', '/boards/b1/changes', {
+      upsertCards: [{ ...card('c1', 'Book flights', 'col1', 0), start_date: '2026-10-25' }],
+    })
+    const stored = () => ana.call('GET', '/boards/b1').then((r) => r.data.cards[0])
+    expect(await stored()).toMatchObject({ start_date: '2026-10-25', due_date: '2026-11-01' })
+
+    await ana.call('POST', '/boards/b1/changes', { upsertCards: [card('c1', 'Book cheap flights', 'col1', 0)] })
+    expect(await stored()).toMatchObject({ title: 'Book cheap flights', start_date: '2026-10-25' })
+
+    await ana.call('POST', '/boards/b1/changes', { upsertCards: [{ ...card('c1', 'x', 'col1', 0), start_date: null }] })
+    expect((await stored()).start_date).toBeNull()
+
+    const viewer = await share(ana, 'ben@example.com', 'viewer')
+    const refused = await viewer.call('POST', '/boards/b1/changes', {
+      upsertCards: [{ ...card('c1', 'x', 'col1', 0), start_date: '2026-10-01' }],
+    })
+    expect(refused.status).toBe(403)
+  })
+
   it('syncs the team and card assignees, and keeps them when an older app leaves them out', async () => {
     const ana = await ownerWithBoard()
     const team = [{ id: 'm1', name: 'Kim', color: '#0090ff', capacity: 2 }]
@@ -586,6 +607,45 @@ describe('REST API (v1)', () => {
     expect((await stranger.call('POST', '/v1/cards/c1/progress', { text: 'x' })).status).toBe(404)
   })
 
+  it('needs a start and end date on R4C and Project cards', async () => {
+    const ana = await ownerWithBoard()
+    const n8n = await apiKeyFor(ana)
+    const add = (body: object) => n8n.call('POST', '/v1/boards/b1/cards', { column: 'To do', title: 'Rollout', ...body })
+
+    const missing = await add({ labels: ['R4C'] })
+    expect(missing.status).toBe(400)
+    expect(missing.data.error).toMatch(/R4C cards need a start date and an end date/)
+    expect((await add({ labels: ['project'], startDate: '2026-11-01' })).data.error).toMatch(/need an end date/)
+    expect((await add({ labels: ['Project'], dueDate: '2026-11-30' })).data.error).toMatch(/need a start date/)
+    expect((await add({ startDate: '2026-12-01', dueDate: '2026-11-30' })).data.error).toMatch(/start date is after/)
+    expect((await add({ startDate: 'soon' })).status).toBe(400)
+
+    const created = await add({ labels: ['R4C', 'Project'], startDate: '2026-11-01', dueDate: '2026-11-30' })
+    expect(created.status).toBe(201)
+    expect(created.data).toMatchObject({ startDate: '2026-11-01', dueDate: '2026-11-30' })
+    const id = created.data.id
+
+    // Clearing either date, or moving the end before the start, is refused.
+    expect((await n8n.call('PATCH', `/v1/cards/${id}`, { startDate: null })).status).toBe(400)
+    expect((await n8n.call('PATCH', `/v1/cards/${id}`, { dueDate: '2026-10-01' })).status).toBe(400)
+    const moved = await n8n.call('PATCH', `/v1/cards/${id}`, { startDate: '2026-11-03', dueDate: '2026-12-05' })
+    expect(moved.data).toMatchObject({ startDate: '2026-11-03', dueDate: '2026-12-05' })
+    // Taking the label off lets the dates go.
+    const plain = await n8n.call('PATCH', `/v1/cards/${id}`, { labels: [], startDate: null })
+    expect(plain.data).toMatchObject({ labels: [], startDate: null, dueDate: '2026-12-05' })
+
+    // Adding the label to a card without dates is refused; older cards can still be renamed and moved.
+    expect((await n8n.call('PATCH', '/v1/cards/c1', { labels: ['R4C'] })).status).toBe(400)
+    await db.query(`update kanban.cards set label_ids = '["l1","lp"]'::jsonb, due_date = null where id = 'c1'`)
+    await db.query(
+      `update kanban.boards set labels = labels || '[{"id":"lp","name":"Project","color":"#f76b15"}]'::jsonb where id = 'b1'`,
+    )
+    expect((await n8n.call('PATCH', '/v1/cards/c1', { title: 'Book flights soon', column: 'Done' })).status).toBe(200)
+
+    const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
+    expect((await viewer.call('PATCH', `/v1/cards/${id}`, { startDate: '2026-11-04' })).status).toBe(403)
+  })
+
   it('gives API keys their owner’s role on each board', async () => {
     const ana = await ownerWithBoard()
     const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
@@ -755,6 +815,27 @@ describe('MCP endpoint', () => {
     const load = await call('get_workload', { boardId: 'b1' })
     expect(load.members).toEqual([expect.objectContaining({ name: 'Kim', openCount: 1, level: 'full' })])
     expect(await call('remove_team_member', { boardId: 'b1', member: 'Kim' })).toEqual({ ok: true })
+
+    const createTool = tools.find((t: { name: string }) => t.name === 'create_card')
+    expect(Object.keys(createTool.inputSchema.properties)).toEqual(expect.arrayContaining(['startDate', 'dueDate']))
+    const undated = await rpc(n8n, 'tools/call', {
+      name: 'create_card',
+      arguments: { boardId: 'b1', column: 'To do', title: 'Migrate EDI', labels: ['R4C'] },
+    })
+    expect(undated.data.result.isError).toBe(true)
+    expect(undated.data.result.content[0].text).toMatch(/R4C cards need a start date and an end date/)
+    const dated = await call('create_card', {
+      boardId: 'b1',
+      column: 'To do',
+      title: 'Migrate EDI',
+      labels: ['R4C'],
+      startDate: '2026-11-01',
+      dueDate: '2026-11-20',
+    })
+    expect(dated).toMatchObject({ startDate: '2026-11-01', dueDate: '2026-11-20' })
+    expect(await call('update_card', { cardId: dated.id, startDate: '2026-11-02' })).toMatchObject({
+      startDate: '2026-11-02',
+    })
   })
 
   it('returns refusals and bad input as tool errors, and unknown methods as JSON-RPC errors', async () => {

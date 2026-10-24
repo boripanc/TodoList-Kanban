@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { Board, Card, Priority } from '../types'
 import { useStore } from '../state/context'
 import { findColumnOfCard } from '../state/reducer'
 import { createId } from '../lib/id'
 import { dueStatus, formatDue } from '../lib/dates'
+import { needsDateRange, scheduleProblem } from '../lib/schedule'
 import { Modal } from './Modal'
 import { NewLabelForm } from './LabelEditor'
 import { priorityLabel } from '../lib/priority'
@@ -28,16 +29,21 @@ export function CardModal({
   const [title, setTitle] = useState(card.title)
   const [description, setDescription] = useState(card.description)
   const column = findColumnOfCard(state, card.id)
+  const startRef = useRef<HTMLInputElement>(null)
+  const labelNames = board.labels.filter((l) => card.labelIds.includes(l.id)).map((l) => l.name)
+  const needsRange = needsDateRange(labelNames)
+  const dateProblem = scheduleProblem(card, labelNames)
 
   const update = (patch: Partial<Omit<Card, 'id' | 'createdAt'>>) =>
     dispatch({ type: 'card/update', cardId: card.id, patch, now: Date.now() })
 
-  const toggleLabel = (labelId: string) =>
-    update({
-      labelIds: card.labelIds.includes(labelId)
-        ? card.labelIds.filter((id) => id !== labelId)
-        : [...card.labelIds, labelId],
-    })
+  const toggleLabel = (labelId: string) => {
+    const adding = !card.labelIds.includes(labelId)
+    update({ labelIds: adding ? [...card.labelIds, labelId] : card.labelIds.filter((id) => id !== labelId) })
+    // R4C and Project cards need a start and end date: take the person straight there.
+    const label = board.labels.find((l) => l.id === labelId)
+    if (adding && label && needsDateRange([label.name]) && (!card.startDate || !card.dueDate)) startRef.current?.focus()
+  }
 
   const addChecklistItem = () => {
     const text = newItem.trim()
@@ -171,22 +177,64 @@ export function CardModal({
             </label>
 
             <div className="field">
-              <label htmlFor="due-date">Due date</label>
+              <label htmlFor="start-date">
+                Start date{needsRange && <span className="required-mark"> (required)</span>}
+              </label>
+              <div className="due-row">
+                <input
+                  id="start-date"
+                  ref={startRef}
+                  type="date"
+                  value={card.startDate ?? ''}
+                  max={card.dueDate ?? undefined}
+                  required={needsRange}
+                  aria-invalid={needsRange && !card.startDate}
+                  onChange={(e) => update({ startDate: e.target.value || null })}
+                />
+                {card.startDate && (
+                  <button
+                    className="icon-button"
+                    aria-label="Clear start date"
+                    onClick={() => update({ startDate: null })}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="field">
+              <label htmlFor="due-date">
+                {needsRange ? 'End date' : 'Due date'}
+                {needsRange && <span className="required-mark"> (required)</span>}
+              </label>
               <div className="due-row">
                 <input
                   id="due-date"
                   type="date"
                   value={card.dueDate ?? ''}
+                  min={card.startDate ?? undefined}
+                  required={needsRange}
+                  aria-invalid={needsRange && !card.dueDate}
                   onChange={(e) => update({ dueDate: e.target.value || null })}
                 />
                 {card.dueDate && (
-                  <button className="icon-button" aria-label="Clear due date" onClick={() => update({ dueDate: null })}>
+                  <button
+                    className="icon-button"
+                    aria-label={needsRange ? 'Clear end date' : 'Clear due date'}
+                    onClick={() => update({ dueDate: null })}
+                  >
                     ✕
                   </button>
                 )}
               </div>
               {card.dueDate && (
                 <small className={`due-hint due-${dueStatus(card.dueDate)}`}>{formatDue(card.dueDate)}</small>
+              )}
+              {dateProblem && (
+                <small className="date-warning" role="alert">
+                  ⚠ {dateProblem}
+                </small>
               )}
             </div>
 

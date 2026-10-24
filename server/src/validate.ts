@@ -106,6 +106,10 @@ export function cardRow(value: unknown, boardId: string): CardRow {
       ? {}
       : { assignee_ids: arr(c.assignee_ids, 'assignee_ids', 200).map((a) => id(a, 'assignee id')) }),
     priority,
+    // Apps from before start dates existed leave it out; the database then keeps what it has.
+    ...(c.start_date === undefined
+      ? {}
+      : { start_date: c.start_date === null ? null : str(c.start_date, 'start_date', 10) }),
     due_date: c.due_date === null ? null : str(c.due_date, 'due_date', 10),
     checklist: arr(c.checklist, 'checklist', 500).map((item) => {
       const i = obj(item, 'checklist item')
@@ -192,6 +196,9 @@ export interface CardInput {
   title?: string
   description?: string
   priority?: CardRow['priority']
+  /** When work starts. */
+  startDate?: string | null
+  /** When it is due: the end date. */
   dueDate?: string | null
   /** Label ids or names; unknown names become new labels. */
   labels?: string[]
@@ -302,6 +309,7 @@ export function cardInput(value: unknown, isNew: boolean): CardInput {
     title: isNew ? title(c.title, 'title', 1000) : optional(c.title, (v) => title(v, 'title', 1000)),
     description: optional(c.description, (v) => str(v, 'description', 50_000)),
     priority: optional(c.priority, priority),
+    startDate: optional(c.startDate, (v) => (v === null || v === '' ? null : date(v, 'startDate'))),
     dueDate: optional(c.dueDate, (v) => (v === null || v === '' ? null : date(v, 'dueDate'))),
     labels: optional(c.labels, (v) => arr(v, 'labels', 200).map((l) => title(l, 'label', 100))),
     checklist: optional(c.checklist, (v) =>

@@ -56,9 +56,19 @@ describe('cards', () => {
     state = run(
       state,
       { type: 'card/add', columnId: col, id: 'c1', title: '  Write report  ', now },
-      { type: 'card/update', cardId: 'c1', patch: { priority: 'high', dueDate: '2030-01-01' }, now: now + 1 },
+      {
+        type: 'card/update',
+        cardId: 'c1',
+        patch: { priority: 'high', startDate: '2029-12-01', dueDate: '2030-01-01' },
+        now: now + 1,
+      },
     )
-    expect(state.cards.c1).toMatchObject({ title: 'Write report', priority: 'high', dueDate: '2030-01-01' })
+    expect(state.cards.c1).toMatchObject({
+      title: 'Write report',
+      priority: 'high',
+      startDate: '2029-12-01',
+      dueDate: '2030-01-01',
+    })
     expect(state.cards.c1.updatedAt).toBe(now + 1)
     expect(state.columns[col].cardIds).toEqual(['c1'])
 

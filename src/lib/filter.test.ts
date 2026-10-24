@@ -13,6 +13,7 @@ function card(patch: Partial<Card> = {}): Card {
     labelIds: [],
     assigneeIds: [],
     priority: 'none',
+    startDate: null,
     dueDate: null,
     checklist: [],
     progress: null,

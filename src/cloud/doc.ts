@@ -35,6 +35,8 @@ export interface CardRow {
   /** Left out by apps from before teams existed; the server then keeps what it has. */
   assignee_ids?: string[]
   priority: Priority
+  /** Left out by apps from before start dates existed; the server then keeps what it has. */
+  start_date?: string | null
   due_date: string | null
   checklist: Card['checklist']
   /** Left out by apps from before progress existed; the server then keeps what it has. */
@@ -99,6 +101,7 @@ export function cardRows(doc: BoardDoc): CardRow[] {
           label_ids: card.labelIds,
           assignee_ids: card.assigneeIds,
           priority: card.priority,
+          start_date: card.startDate,
           due_date: card.dueDate,
           checklist: card.checklist,
           progress: card.progress,
@@ -134,6 +137,7 @@ export function docFromRows(board: BoardRow, columnRowList: ColumnRow[], cardRow
         labelIds: c.label_ids,
         assigneeIds: c.assignee_ids ?? [],
         priority: c.priority,
+        startDate: c.start_date ?? null,
         dueDate: c.due_date,
         checklist: c.checklist,
         progress: c.progress ?? null,
