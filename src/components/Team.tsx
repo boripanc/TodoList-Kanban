@@ -17,6 +17,7 @@ import {
 import type { Cloud } from '../cloud/context'
 import { ColorPicker } from './LabelEditor'
 import { Modal } from './Modal'
+import { TeamCalendar, type CalendarView } from './TeamCalendar'
 
 type Person = Pick<TeamMember, 'name' | 'color'>
 
@@ -51,6 +52,12 @@ export function AvatarStack({ people, max = 3 }: { people: Person[]; max?: numbe
     </span>
   )
 }
+
+const viewOptions: ['list' | CalendarView, string][] = [
+  ['list', 'List'],
+  ['timeline', 'Timeline'],
+  ['month', 'Month'],
+]
 
 const levelText: Record<LoadLevel, string> = {
   free: 'Free',
@@ -237,6 +244,7 @@ export function TeamDialog({
 }) {
   const { state, dispatch } = useStore()
   const [scope, setScope] = useState<'board' | 'all'>('board')
+  const [view, setView] = useState<'list' | CalendarView>('list')
   const [name, setName] = useState('')
   const [capacity, setCapacity] = useState('')
   const [color, setColor] = useState(labelColors[board.team.length % labelColors.length])
@@ -276,16 +284,33 @@ export function TeamDialog({
   return (
     <Modal title="Team and workload" onClose={onClose} wide>
       <h2>Team and workload</h2>
-      {boardsWithTeams.length > 1 && (
-        <div className="segmented" role="group" aria-label="Show workload for">
-          <button type="button" className={`chip ${scope === 'board' ? 'on' : ''}`} aria-pressed={scope === 'board'} onClick={() => setScope('board')}>
-            This board
-          </button>
-          <button type="button" className={`chip ${scope === 'all' ? 'on' : ''}`} aria-pressed={scope === 'all'} onClick={() => setScope('all')}>
-            All boards
-          </button>
-        </div>
-      )}
+      <div className="team-views">
+        {workload.members.length > 0 && (
+          <div className="segmented" role="group" aria-label="View">
+            {viewOptions.map(([value, text]) => (
+              <button
+                key={value}
+                type="button"
+                className={`chip ${view === value ? 'on' : ''}`}
+                aria-pressed={view === value}
+                onClick={() => setView(value)}
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+        )}
+        {boardsWithTeams.length > 1 && (
+          <div className="segmented" role="group" aria-label="Show workload for">
+            <button type="button" className={`chip ${scope === 'board' ? 'on' : ''}`} aria-pressed={scope === 'board'} onClick={() => setScope('board')}>
+              This board
+            </button>
+            <button type="button" className={`chip ${scope === 'all' ? 'on' : ''}`} aria-pressed={scope === 'all'} onClick={() => setScope('all')}>
+              All boards
+            </button>
+          </div>
+        )}
+      </div>
       {scope === 'all' && (
         <p className="muted small">People with the same name on different boards count as one person.</p>
       )}
@@ -294,6 +319,8 @@ export function TeamDialog({
         <p className="muted">
           No team on this board yet. Add the people you work with, then assign cards to them to see who has what.
         </p>
+      ) : view !== 'list' ? (
+        <TeamCalendar view={view} workload={workload} showBoard={scope === 'all'} onOpenCard={onOpenCard} />
       ) : (
         <ul className="workload">
           {workload.members.map((load) => (

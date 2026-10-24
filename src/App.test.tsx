@@ -275,6 +275,37 @@ describe('App', () => {
     expect(screen.getByRole('dialog', { name: 'Edit card: Fix login timeout' })).toBeInTheDocument()
   })
 
+  it('shows who is busy when on a timeline and a month calendar', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    await user.click(screen.getByRole('button', { name: 'Team' }))
+    const dialog = screen.getByRole('dialog', { name: 'Team and workload' })
+    await user.click(within(dialog).getByRole('button', { name: 'Timeline' }))
+
+    const alex = within(dialog).getByRole('row', { name: 'Timeline: Alex' })
+    expect(within(alex).getByRole('button', { name: /^Plan next sprint/ })).toBeInTheDocument()
+    expect(within(alex).getByRole('button', { name: /^Fix login timeout/ })).toBeInTheDocument()
+    const sam = within(dialog).getByRole('row', { name: 'Timeline: Sam' })
+    expect(within(sam).getByRole('button', { name: /^Plan next sprint/ })).toBeInTheDocument()
+    expect(within(sam).queryByRole('button', { name: /^Fix login timeout/ })).not.toBeInTheDocument()
+
+    // Showing one person hides the others.
+    await user.click(within(dialog).getByRole('button', { name: 'Sam' }))
+    expect(within(dialog).queryByRole('row', { name: 'Timeline: Alex' })).not.toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Everyone' }))
+
+    // The month view lists a day's cards and who has them.
+    await user.click(within(dialog).getByRole('button', { name: 'Month' }))
+    const month = within(dialog).getByRole('region', { name: 'Team month' })
+    const today = new Date()
+    const dayName = today.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+    await user.click(within(month).getByRole('button', { name: new RegExp(`^${dayName}:`) }))
+    const detail = within(dialog).getByRole('region', { name: `Cards on ${dayName}` })
+    expect(within(detail).getByRole('img', { name: 'Assigned to Alex, Sam' })).toBeInTheDocument()
+    await user.click(within(detail).getByRole('button', { name: 'Plan next sprint' }))
+    expect(screen.getByRole('dialog', { name: 'Edit card: Plan next sprint' })).toBeInTheDocument()
+  })
+
   it('filters the board to one person from the workload view', async () => {
     const user = userEvent.setup()
     renderApp()
