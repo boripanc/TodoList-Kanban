@@ -144,6 +144,7 @@ export function CardView({
       {(card.priority !== 'none' ||
         schedule ||
         dateProblem ||
+        card.estimateDays ||
         card.checklist.length > 0 ||
         card.description ||
         assignees.length > 0) && (
@@ -165,6 +166,11 @@ export function CardView({
               }
             >
               📅 {schedule}
+            </span>
+          )}
+          {card.estimateDays !== null && (
+            <span className="badge" title={`Estimate: ${card.estimateDays} man-days`}>
+              ⏱ {card.estimateDays} MD
             </span>
           )}
           {dateProblem && (

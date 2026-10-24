@@ -46,6 +46,13 @@ const dueDate = {
   description:
     'Due date (the end date) as YYYY-MM-DD; null or "" clears it. Cards labelled R4C or Project need both startDate and dueDate.',
 }
+const estimateDays = {
+  type: ['number', 'null'],
+  exclusiveMinimum: 0,
+  maximum: 999,
+  description:
+    'Estimated effort in man-days (MD), e.g. 3 or 0.5; null clears it. For cards not labelled R4C or Project, the due date is worked out from the start date and this (weekdays only), and the start date is set to today when the card moves into an in-progress column.',
+}
 const labels = {
   type: 'array',
   items: { type: 'string' },
@@ -80,6 +87,7 @@ const cardFields = {
   priority,
   startDate,
   dueDate,
+  estimateDays,
   labels,
   checklist,
   progress,

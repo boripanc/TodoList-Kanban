@@ -50,6 +50,43 @@ describe('boards', () => {
 })
 
 describe('cards', () => {
+  it('starts a card when it lands in progress, with a due date from its estimate', () => {
+    let { state, board } = workBoard()
+    const [, todo, doing] = board.columnIds
+    const projectLabel = { id: 'lp', name: 'Project', color: '#f76b15' }
+    state = run(
+      state,
+      { type: 'label/add', boardId: board.id, label: projectLabel },
+      { type: 'card/add', columnId: todo, id: 'c1', title: 'Fix import', now },
+      { type: 'card/add', columnId: todo, id: 'c2', title: 'Rollout', now },
+      { type: 'card/update', cardId: 'c1', patch: { estimateDays: 3 }, now },
+      { type: 'card/update', cardId: 'c2', patch: { estimateDays: 3, labelIds: ['lp'] }, now },
+      // Not in progress yet: nothing changes.
+      { type: 'card/startWork', cardId: 'c1', today: '2026-10-21', now: now + 1 },
+    )
+    expect(state.cards.c1).toMatchObject({ startDate: null, dueDate: null, updatedAt: now })
+
+    state = run(
+      state,
+      { type: 'card/move', cardId: 'c1', toColumnId: doing, toIndex: 0 },
+      { type: 'card/move', cardId: 'c2', toColumnId: doing, toIndex: 0 },
+      { type: 'card/startWork', cardId: 'c1', today: '2026-10-22', now: now + 2 },
+      { type: 'card/startWork', cardId: 'c2', today: '2026-10-22', now: now + 2 },
+    )
+    expect(state.cards.c1).toMatchObject({ startDate: '2026-10-22', dueDate: '2026-10-26', updatedAt: now + 2 })
+    // Project cards keep the dates set by hand.
+    expect(state.cards.c2).toMatchObject({ startDate: null, dueDate: null })
+
+    // Moving back and in again keeps the first start date.
+    state = run(
+      state,
+      { type: 'card/move', cardId: 'c1', toColumnId: todo, toIndex: 0 },
+      { type: 'card/move', cardId: 'c1', toColumnId: doing, toIndex: 0 },
+      { type: 'card/startWork', cardId: 'c1', today: '2026-11-02', now: now + 3 },
+    )
+    expect(state.cards.c1.startDate).toBe('2026-10-22')
+  })
+
   it('adds, updates and deletes a card', () => {
     let { state, board } = workBoard()
     const col = board.columnIds[0]

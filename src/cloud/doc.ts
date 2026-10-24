@@ -38,6 +38,8 @@ export interface CardRow {
   /** Left out by apps from before start dates existed; the server then keeps what it has. */
   start_date?: string | null
   due_date: string | null
+  /** Left out by apps from before estimates existed; the server then keeps what it has. */
+  estimate_days?: number | null
   checklist: Card['checklist']
   /** Left out by apps from before progress existed; the server then keeps what it has. */
   progress?: Card['progress']
@@ -103,6 +105,7 @@ export function cardRows(doc: BoardDoc): CardRow[] {
           priority: card.priority,
           start_date: card.startDate,
           due_date: card.dueDate,
+          estimate_days: card.estimateDays,
           checklist: card.checklist,
           progress: card.progress,
           progress_log: card.progressLog,
@@ -139,6 +142,7 @@ export function docFromRows(board: BoardRow, columnRowList: ColumnRow[], cardRow
         priority: c.priority,
         startDate: c.start_date ?? null,
         dueDate: c.due_date,
+        estimateDays: c.estimate_days ?? null,
         checklist: c.checklist,
         progress: c.progress ?? null,
         progressLog: c.progress_log ?? [],
