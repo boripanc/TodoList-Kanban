@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
 import { StoreProvider } from './state/store'
@@ -550,6 +550,68 @@ describe('accounts and sharing', () => {
       deleteCardIds: [],
     })
     expect(await screen.findByRole('option', { name: 'Trip to Japan · can edit' })).toBeInTheDocument()
+  })
+
+  it('lets the board owner approve or reject assignments asked for through MCP', async () => {
+    const user = userEvent.setup()
+    const { server, ana, boardId } = await serverWithTrip()
+    const anaApi = server.client(ana)
+    const doc = (await anaApi.fetchBoard(boardId))!
+    await anaApi.applyOps(boardId, {
+      board: { title: 'Trip', labels: doc.board.labels, team: [{ id: 'kim', name: 'Kim', color: '#0090ff', capacity: 0 }] },
+      upsertColumns: [],
+      deleteColumnIds: [],
+      upsertCards: [],
+      deleteCardIds: [],
+    })
+    renderWithCloud(anaApi)
+    const trip = await screen.findByRole('option', { name: 'Trip' })
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Current board' }), trip)
+
+    act(() => server.requestAssignment(boardId, 'c1', ['Kim', 'Lee'], 'ana@example.com'))
+    expect(await screen.findByText('1 assignment from MCP needs your approval.')).toBeInTheDocument()
+    expect(screen.getByText('⏳ Assignment pending')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Review' }))
+    let dialog = screen.getByRole('dialog', { name: 'Assignments to approve' })
+    expect(within(dialog).getByText('Kim, Lee (new to the team)')).toBeInTheDocument()
+    expect(within(dialog).getByText(/Now: nobody · asked by ana@example.com/)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Approve assignment for Pack bags' }))
+    expect(await within(dialog).findByText('Nothing is waiting.')).toBeInTheDocument()
+    expect(server.cards.get('c1')!.assignee_ids).toHaveLength(2)
+    expect(server.boards.get(boardId)!.team!.map((m) => m.name)).toEqual(['Kim', 'Lee'])
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByText(/needs your approval/)).not.toBeInTheDocument())
+    expect(screen.queryByText('⏳ Assignment pending')).not.toBeInTheDocument()
+
+    // A second request, turned down from the card itself.
+    act(() => server.requestAssignment(boardId, 'c1', [], 'ana@example.com'))
+    await screen.findByText('⏳ Assignment pending')
+    await user.click(screen.getByRole('button', { name: 'Card: Pack bags' }))
+    dialog = screen.getByRole('dialog', { name: 'Edit card: Pack bags' })
+    expect(within(dialog).getByText(/Waiting for approval: assign to/)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Reject assignment for Pack bags' }))
+    await waitFor(() => expect(within(dialog).queryByText(/Waiting for approval/)).not.toBeInTheDocument())
+    expect(server.assignmentRequests).toEqual([])
+    expect(server.cards.get('c1')!.assignee_ids).toHaveLength(2)
+  })
+
+  it('shows other members that an assignment waits for the owner, without approving', async () => {
+    const user = userEvent.setup()
+    const { server, ana, boardId } = await serverWithTrip()
+    await server.client(ana).inviteByEmail(boardId, 'ben@example.com', 'editor')
+    const benApi = server.client(server.addUser('ben@example.com'))
+    await benApi.acceptInvite((await benApi.listReceivedInvites())[0].id)
+    server.requestAssignment(boardId, 'c1', ['Kim'], 'ben@example.com')
+    renderWithCloud(benApi)
+    const trip = await screen.findByRole('option', { name: 'Trip · can edit' })
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Current board' }), trip)
+
+    expect(await screen.findByText('1 assignment is waiting for the board owner to approve.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'View' }))
+    const dialog = screen.getByRole('dialog', { name: 'Assignments to approve' })
+    expect(within(dialog).getByText('Kim (new to the team)')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: /Approve/ })).not.toBeInTheDocument()
   })
 
   it('creates an API key for n8n, shows it once, and revokes it', async () => {

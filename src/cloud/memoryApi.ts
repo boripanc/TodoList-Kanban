@@ -1,6 +1,7 @@
 import type { Role } from '../types'
 import type {
   ApiKey,
+  AssignmentRequest,
   CloudApi,
   ConnectedApp,
   CloudUser,
@@ -34,6 +35,8 @@ export class MemoryServer {
   contacts: (Contact & { userId: string })[] = []
   /** Secrets are kept in `secrets` here; the real server encrypts them. */
   credentials: (Credential & { userId: string; secrets: CredentialSecrets })[] = []
+  /** Assignments asked for through MCP, waiting for the board owner. */
+  assignmentRequests: (AssignmentRequest & { boardId: string })[] = []
   private listeners = new Set<{ userId: string; onBoard: (id: string) => void; onMembership: () => void }>()
   private clock = 0
   private nextId = 1
@@ -74,6 +77,21 @@ export class MemoryServer {
 
   token() {
     return `token-${this.nextId++}`
+  }
+
+  /**
+   * What an assignment through MCP does on the server: the card keeps its
+   * assignees and the board owner gets a request (replacing an older one).
+   */
+  requestAssignment(boardId: string, cardId: string, wanted: string[], requestedBy: string) {
+    const team = this.boards.get(boardId)?.team ?? []
+    const assignees = wanted.map((want) => {
+      const m = team.find((t) => t.id === want) ?? team.find((t) => t.name.toLowerCase() === want.toLowerCase())
+      return m ? { id: m.id, name: m.name } : { id: null, name: want }
+    })
+    this.assignmentRequests = this.assignmentRequests.filter((r) => r.cardId !== cardId)
+    this.assignmentRequests.push({ boardId, cardId, assignees, requestedBy, requestedAt: new Date().toISOString() })
+    this.touch(boardId)
   }
 }
 
@@ -174,6 +192,8 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
         server.columns.delete(id)
         for (const [cardId, card] of server.cards) if (card.column_id === id) server.cards.delete(cardId)
       }
+      // Like the server: a deleted card takes its waiting assignment with it.
+      server.assignmentRequests = server.assignmentRequests.filter((r) => server.cards.has(r.cardId))
       server.touch(boardId)
     },
     async deleteBoard(boardId) {
@@ -268,6 +288,40 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
       if (!invite) throw new Error('This invite link is no longer valid')
       join(invite.boardId, invite.role)
       return invite.boardId
+    },
+
+    async listAssignmentRequests(boardId) {
+      if (!server.role(boardId, user?.id)) throw new Error('Board not found')
+      return structuredClone(
+        server.assignmentRequests.filter((r) => r.boardId === boardId).map(({ boardId: _b, ...r }) => r),
+      )
+    },
+    async approveAssignment(boardId, cardId) {
+      isOwner(boardId)
+      const request = server.assignmentRequests.find((r) => r.boardId === boardId && r.cardId === cardId)
+      const card = server.cards.get(cardId)
+      const board = server.boards.get(boardId)!
+      if (!request || !card) throw new Error('No assignment is waiting for that card')
+      const team = [...(board.team ?? [])]
+      const ids = request.assignees.map((p) => {
+        const m =
+          team.find((t) => t.id === p.id) ?? team.find((t) => t.name.toLowerCase() === p.name.toLowerCase())
+        if (m) return m.id
+        const added = { id: `member-${server.token()}`, name: p.name, color: '#8b8d98', capacity: 0 }
+        team.push(added)
+        return added.id
+      })
+      board.team = team
+      server.cards.set(cardId, { ...card, assignee_ids: ids, updated_at: Date.now() })
+      server.assignmentRequests = server.assignmentRequests.filter((r) => r !== request)
+      server.touch(boardId)
+    },
+    async rejectAssignment(boardId, cardId) {
+      isOwner(boardId)
+      const before = server.assignmentRequests.length
+      server.assignmentRequests = server.assignmentRequests.filter((r) => !(r.boardId === boardId && r.cardId === cardId))
+      if (server.assignmentRequests.length === before) throw new Error('No assignment is waiting for that card')
+      server.touch(boardId)
     },
 
     async listApiKeys() {

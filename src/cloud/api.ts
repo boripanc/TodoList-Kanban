@@ -30,6 +30,19 @@ export interface ReceivedInvite {
   invitedBy: string
 }
 
+/**
+ * An assignment an AI agent or automation asked for through MCP. It waits for
+ * the board owner to approve it; until then the card keeps its assignees.
+ */
+export interface AssignmentRequest {
+  cardId: string
+  /** Who the card would be assigned to; id is null for a name that joins the team on approval. [] unassigns everyone. */
+  assignees: { id: string | null; name: string }[]
+  /** Email of the account whose API key or connected app asked. */
+  requestedBy: string | null
+  requestedAt: string
+}
+
 /** An API key, for automation tools such as n8n. The key itself is only shown once, on creation. */
 export interface ApiKey {
   id: string
@@ -139,6 +152,13 @@ export interface CloudApi {
   declineInvite(inviteId: string): Promise<void>
   /** Returns the board id. */
   joinWithLink(token: string): Promise<string>
+
+  /** Assignments on a board waiting for its owner, oldest first. */
+  listAssignmentRequests(boardId: string): Promise<AssignmentRequest[]>
+  /** Owner only: the card gets the requested assignees. */
+  approveAssignment(boardId: string, cardId: string): Promise<void>
+  /** Owner only: the request goes away and the card stays as it is. */
+  rejectAssignment(boardId: string, cardId: string): Promise<void>
 
   listApiKeys(): Promise<ApiKey[]>
   /** Returns the new key's details and the secret key, which can't be read again later. */

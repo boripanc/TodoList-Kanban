@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useStore } from '../state/context'
-import type { CloudApi, CloudUser, ReceivedInvite } from './api'
+import type { AssignmentRequest, CloudApi, CloudUser, ReceivedInvite } from './api'
 import { CloudContext, type Cloud } from './context'
 import { CloudSync } from './sync'
 import { SignInPage } from '../components/Sharing'
@@ -84,6 +84,16 @@ function CloudSession({ api, children }: { api: CloudApi; children: ReactNode })
   const [error, setError] = useState<string | null>(null)
   const [joinToken, setJoinToken] = useState<string | null>(readPendingJoin)
   const syncRef = useRef<CloudSync | null>(null)
+  const [requests, setRequests] = useState<{ boardId: string; list: AssignmentRequest[] } | null>(null)
+
+  // The board on screen (like App picks it), if it is in the account.
+  const shownId =
+    state.activeBoardId && state.boards[state.activeBoardId] ? state.activeBoardId : (state.boardOrder[0] ?? null)
+  const cloudBoardId = shownId && state.boards[shownId]?.cloud ? shownId : null
+  const cloudBoardRef = useRef(cloudBoardId)
+  useEffect(() => {
+    cloudBoardRef.current = cloudBoardId
+  })
 
   const reportError = useCallback((e: unknown) => setError(message(e)), [])
   const saved = useCallback(() => syncRef.current?.idle() ?? Promise.resolve(), [])
@@ -112,11 +122,33 @@ function CloudSession({ api, children }: { api: CloudApi; children: ReactNode })
     }
   }, [api])
 
+  /** Reload the assignments waiting on a board, if that board is still the one on screen. */
+  const refreshRequests = useCallback(
+    async (boardId: string) => {
+      try {
+        const list = await api.listAssignmentRequests(boardId)
+        if (cloudBoardRef.current === boardId) setRequests({ boardId, list })
+      } catch (e) {
+        console.error(e)
+      }
+    },
+    [api],
+  )
+
   const refresh = useCallback(async () => {
     const sync = syncRef.current
     if (!sync) return
-    await Promise.all([sync.refreshAll().catch(reportError), refreshInvites()])
-  }, [refreshInvites, reportError])
+    const boardId = cloudBoardRef.current
+    await Promise.all([
+      sync.refreshAll().catch(reportError),
+      refreshInvites(),
+      boardId ? refreshRequests(boardId) : undefined,
+    ])
+  }, [refreshInvites, refreshRequests, reportError])
+
+  useEffect(() => {
+    if (user && cloudBoardId) void refreshRequests(cloudBoardId)
+  }, [user, cloudBoardId, refreshRequests])
 
   // One sync engine per signed-in user.
   useEffect(() => {
@@ -136,7 +168,11 @@ function CloudSession({ api, children }: { api: CloudApi; children: ReactNode })
       timers.set(key, window.setTimeout(run, 300))
     }
     const unsubscribe = api.subscribe(user.id, {
-      onBoard: (id) => later(id, () => void sync.refresh(id).catch(reportError)),
+      onBoard: (id) =>
+        later(id, () => {
+          void sync.refresh(id).catch(reportError)
+          if (cloudBoardRef.current === id) void refreshRequests(id)
+        }),
       onMembership: () =>
         later('*', () => {
           void sync.refreshAll().catch(reportError)
@@ -147,6 +183,7 @@ function CloudSession({ api, children }: { api: CloudApi; children: ReactNode })
       if (document.visibilityState === 'visible') {
         void sync.refreshAll().catch(() => {})
         void refreshInvites()
+        if (cloudBoardRef.current) void refreshRequests(cloudBoardRef.current)
       }
     }
     document.addEventListener('visibilitychange', onFocus)
@@ -159,7 +196,7 @@ function CloudSession({ api, children }: { api: CloudApi; children: ReactNode })
       sync.stop()
       syncRef.current = null
     }
-  }, [api, user, dispatch, getState, refreshInvites, reportError])
+  }, [api, user, dispatch, getState, refreshInvites, refreshRequests, reportError])
 
   // Send local edits once a burst of changes (like a drag) settles.
   useEffect(() => {
@@ -228,10 +265,35 @@ function CloudSession({ api, children }: { api: CloudApi; children: ReactNode })
         await api.declineInvite(inviteId)
         await refreshInvites()
       },
+      assignmentRequests: user && requests && requests.boardId === cloudBoardId ? requests.list : [],
+      approveAssignment: async (cardId) => {
+        if (!cloudBoardId) return
+        await api.approveAssignment(cloudBoardId, cardId)
+        await Promise.all([syncRef.current?.refresh(cloudBoardId), refreshRequests(cloudBoardId)])
+      },
+      rejectAssignment: async (cardId) => {
+        if (!cloudBoardId) return
+        await api.rejectAssignment(cloudBoardId, cardId)
+        await refreshRequests(cloudBoardId)
+      },
       saved,
       refresh,
     }),
-    [api, user, invites, joinToken, error, reportError, saved, dispatch, refresh, refreshInvites],
+    [
+      api,
+      user,
+      invites,
+      joinToken,
+      error,
+      reportError,
+      saved,
+      dispatch,
+      refresh,
+      refreshInvites,
+      requests,
+      cloudBoardId,
+      refreshRequests,
+    ],
   )
 
   return (

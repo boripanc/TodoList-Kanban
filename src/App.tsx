@@ -17,6 +17,7 @@ import { ContactsDialog } from './components/Contacts'
 import { CredentialsDialog } from './components/Credentials'
 import { InvitesDialog, ShareDialog } from './components/Sharing'
 import { TeamDialog } from './components/Team'
+import { AssignmentNotice, AssignmentsDialog } from './components/Assignments'
 import { roleName } from './cloud/api'
 import { useCloud } from './cloud/context'
 import { findBoardOfCard, isReadOnly } from './state/reducer'
@@ -39,6 +40,7 @@ export default function App() {
     | 'api-keys'
     | 'contacts'
     | 'credentials'
+    | 'assignments'
     | null
   >(null)
   const [theme, setTheme] = useState<Theme>(loadTheme)
@@ -279,6 +281,7 @@ export default function App() {
           </button>
         </div>
       )}
+      {cloud && board && <AssignmentNotice cloud={cloud} board={board} onReview={() => setDialog('assignments')} />}
       {board && readOnly && (
         <div className="notice" role="status">
           You can view this board but not change it.
@@ -349,6 +352,18 @@ export default function App() {
       )}
       {cloud && dialog === 'share' && board && (
         <ShareDialog cloud={cloud} board={board} onClose={() => setDialog(null)} />
+      )}
+      {cloud && dialog === 'assignments' && board && (
+        <AssignmentsDialog
+          cloud={cloud}
+          board={board}
+          cards={state.cards}
+          onClose={() => setDialog(null)}
+          onOpenCard={(cardId) => {
+            setDialog(null)
+            setOpenCardId(cardId)
+          }}
+        />
       )}
       {cloud && dialog === 'invites' && <InvitesDialog cloud={cloud} onClose={() => setDialog(null)} />}
       {cloud && dialog === 'api-keys' && <ApiKeysDialog cloud={cloud} onClose={() => setDialog(null)} />}

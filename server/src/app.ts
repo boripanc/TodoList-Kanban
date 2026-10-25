@@ -9,6 +9,7 @@ import { API_KEY_PREFIX, hashPassword, hashToken, MIN_PASSWORD_LENGTH, newToken,
 import type { Db, Queryable } from './db.ts'
 import type { EventHub } from './events.ts'
 import { handleMcp } from './mcp.ts'
+import * as k from './kanban.ts'
 import * as oauth from './oauth.ts'
 import { openApiSpec } from './openapi.ts'
 import { peopleRoutes } from './people.ts'
@@ -500,6 +501,29 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
       boardId,
       target,
     ])
+    return c.json({ ok: true })
+  })
+
+  // --- Assignments asked for through MCP, approved by the board owner ---
+
+  app.get('/boards/:id/assignment-requests', async (c) =>
+    c.json(await k.listAssignmentRequests(db, c.get('user'), c.req.param('id'))),
+  )
+
+  // Only in the app: an API key or connected app must not approve its own requests.
+  const ownerInApp = (c: Context<Env>) => {
+    if (c.get('viaApiKey')) fail(403, 'Assignments are approved by the board owner in the app.')
+  }
+
+  app.post('/boards/:id/assignment-requests/:cardId/approve', async (c) => {
+    ownerInApp(c)
+    await k.approveAssignment(db, c.get('user'), c.req.param('id'), c.req.param('cardId'))
+    return c.json({ ok: true })
+  })
+
+  app.post('/boards/:id/assignment-requests/:cardId/reject', async (c) => {
+    ownerInApp(c)
+    await k.rejectAssignment(db, c.get('user'), c.req.param('id'), c.req.param('cardId'))
     return c.json({ ok: true })
   })
 

@@ -44,6 +44,8 @@ export interface ApiCard {
   labels: ApiLabel[]
   /** Team members the card is assigned to. */
   assignees: { id: string; name: string }[]
+  /** An assignment asked for through MCP, waiting for the board owner to approve it in the app. */
+  pendingAssignment: ApiPendingAssignment | null
   checklist: { id: string; text: string; done: boolean }[]
   /** 0-100, or null when the card doesn't track progress. */
   progress: number | null
@@ -52,6 +54,25 @@ export interface ApiCard {
   createdAt: string
   updatedAt: string
 }
+
+export interface ApiPendingAssignment {
+  /** Who the card would be assigned to; id is null for a name that would join the team. [] unassigns everyone. */
+  assignees: { id: string | null; name: string }[]
+  /** Email of the person whose API key or connected app asked. */
+  requestedBy: string | null
+  requestedAt: string
+}
+
+/** An assignment waiting for the board owner, as the app lists them. */
+export interface ApiAssignmentRequest extends ApiPendingAssignment {
+  cardId: string
+}
+
+/**
+ * How assignments in a card change take effect: `now` (REST API) or `request`
+ * (MCP), which asks the board owner to approve them instead.
+ */
+export type AssignMode = 'now' | 'request'
 
 export interface ApiColumn {
   id: string
@@ -133,6 +154,7 @@ function toApiCard(
   column: { id: string; title: string },
   labels: ApiLabel[],
   team: TeamMember[],
+  pending: ApiPendingAssignment | null = null,
 ): ApiCard {
   const byId = new Map(labels.map((l) => [l.id, l]))
   const people = new Map(team.map((m) => [m.id, m]))
@@ -153,6 +175,7 @@ function toApiCard(
       const m = people.get(id)
       return m ? [{ id: m.id, name: m.name }] : []
     }),
+    pendingAssignment: pending,
     checklist: row.checklist,
     progress: row.progress ?? null,
     progressLog: (row.progress_log ?? []).map((e) => ({ ...e, at: iso(e.at) })),
@@ -164,13 +187,36 @@ function toApiCard(
 const byPosition = (a: { position: number; id: string }, b: { position: number; id: string }) =>
   a.position - b.position || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 
+type RequestDbRow = {
+  card_id: string
+  assignees: ApiPendingAssignment['assignees']
+  email: string | null
+  requested_at: Date
+}
+
+const requestColumns = `r.card_id, r.assignees, u.email, r.requested_at
+  from kanban.assignment_requests r left join kanban.users u on u.id = r.requested_by`
+
+const pendingOf = (row: RequestDbRow): ApiPendingAssignment => ({
+  assignees: row.assignees,
+  requestedBy: row.email,
+  requestedAt: iso(row.requested_at),
+})
+
+/** Pending assignments by card id. */
+async function pendingByCard(q: Queryable, where: string, params: unknown[]) {
+  const { rows } = await q.query<RequestDbRow>(`select ${requestColumns} where ${where}`, params)
+  return new Map(rows.map((row) => [row.card_id, pendingOf(row)]))
+}
+
 async function loadBoard(q: Queryable, boardId: string, role: Role): Promise<ApiBoard> {
-  const [boards, columns, cards] = await Promise.all([
+  const [boards, columns, cards, pending] = await Promise.all([
     q.query<BoardDbRow>('select id, title, labels, team, created_at, updated_at from kanban.boards where id = $1', [
       boardId,
     ]),
     q.query<ColumnDbRow>('select id, title, wip_limit, position from kanban.columns where board_id = $1', [boardId]),
     q.query<CardDbRow>('select * from kanban.cards where board_id = $1', [boardId]),
+    pendingByCard(q, 'r.board_id = $1', [boardId]),
   ])
   const board = boards.rows[0]
   if (!board) return fail(404, 'Board not found')
@@ -182,7 +228,10 @@ async function loadBoard(q: Queryable, boardId: string, role: Role): Promise<Api
     cards: cards.rows
       .filter((card) => card.column_id === col.id)
       .sort(byPosition)
-      .map((card, index) => ({ ...toApiCard(card, col, board.labels, board.team), position: index })),
+      .map((card, index) => ({
+        ...toApiCard(card, col, board.labels, board.team, pending.get(card.id)),
+        position: index,
+      })),
   }))
   return {
     id: board.id,
@@ -464,14 +513,21 @@ async function cardOf(db: Db, boardId: string, cardId: string): Promise<ApiCard>
   return board.columns.flatMap((c) => c.cards).find((c) => c.id === cardId) ?? fail(404, 'Card not found')
 }
 
-export async function createCard(db: Db, user: User, boardId: string, input: CardInput): Promise<ApiCard> {
+export async function createCard(
+  db: Db,
+  user: User,
+  boardId: string,
+  input: CardInput,
+  assign: AssignMode = 'now',
+): Promise<ApiCard> {
   const id = randomUUID()
   await db.transaction(async (tx) => {
     await requireRole(tx, boardId, user.id, canEdit)
     await lockBoard(tx, boardId)
     const column = await findColumn(tx, boardId, input.column!)
     const labelIds = await resolveLabels(tx, boardId, input.labels ?? [])
-    const assigneeIds = await resolveAssignees(tx, boardId, input.assignees ?? [])
+    const asked = assign === 'request' && !!input.assignees?.length
+    const assigneeIds = asked ? [] : await resolveAssignees(tx, boardId, input.assignees ?? [])
     const dates = await planDates(
       tx,
       boardId,
@@ -504,18 +560,27 @@ export async function createCard(db: Db, user: User, boardId: string, input: Car
       ],
     )
     await placeCard(tx, boardId, id, column.id, input.position)
+    if (asked) await requestAssignment(tx, user, boardId, id, input.assignees!, [])
   })
   return cardOf(db, boardId, id)
 }
 
-export async function updateCard(db: Db, user: User, cardId: string, input: CardInput): Promise<ApiCard> {
+export async function updateCard(
+  db: Db,
+  user: User,
+  cardId: string,
+  input: CardInput,
+  assign: AssignMode = 'now',
+): Promise<ApiCard> {
   const boardId = await db.transaction(async (tx) => {
     const boardId = await cardBoard(tx, user, cardId, canEdit)
     await lockBoard(tx, boardId)
     const { rows } = await tx.query<CardDbRow>('select * from kanban.cards where id = $1', [cardId])
     const card = rows[0]
     const labelIds = input.labels ? await resolveLabels(tx, boardId, input.labels) : card.label_ids
-    const assigneeIds = input.assignees ? await resolveAssignees(tx, boardId, input.assignees) : card.assignee_ids
+    const asked = assign === 'request' && !!input.assignees
+    const assigneeIds =
+      input.assignees && !asked ? await resolveAssignees(tx, boardId, input.assignees) : card.assignee_ids
     const target = input.column === undefined ? undefined : await findColumn(tx, boardId, input.column)
     const { startDate, dueDate, estimateDays } = await planDates(
       tx,
@@ -551,9 +616,95 @@ export async function updateCard(db: Db, user: User, cardId: string, input: Card
       await placeCard(tx, boardId, cardId, columnId, input.position)
       if (columnId !== card.column_id) await renumberCards(tx, boardId, card.column_id)
     }
+    if (asked) await requestAssignment(tx, user, boardId, cardId, input.assignees!, card.assignee_ids ?? [])
     return boardId
   })
   return cardOf(db, boardId, cardId)
+}
+
+// --- Assignments that wait for the board owner ---
+
+/**
+ * Save an assignment for the board owner to approve instead of making it.
+ * Names the team doesn't have yet are kept as names and join the team only
+ * on approval. Asking for what the card already has drops any older request.
+ */
+async function requestAssignment(
+  tx: Queryable,
+  user: User,
+  boardId: string,
+  cardId: string,
+  wanted: string[],
+  current: string[],
+) {
+  const { rows } = await tx.query<{ team: TeamMember[] }>('select team from kanban.boards where id = $1', [boardId])
+  const team = rows[0]?.team ?? []
+  const people: ApiPendingAssignment['assignees'] = []
+  for (const want of wanted) {
+    const member = findMember(team, want)
+    const person = member ? { id: member.id, name: member.name } : { id: null, name: want }
+    const seen = people.some((p) =>
+      p.id ? p.id === person.id : !person.id && p.name.toLowerCase() === person.name.toLowerCase(),
+    )
+    if (!seen) people.push(person)
+  }
+  const unchanged =
+    people.length === current.length && people.every((p) => p.id !== null && current.includes(p.id))
+  if (unchanged) {
+    await tx.query('delete from kanban.assignment_requests where card_id = $1', [cardId])
+    return
+  }
+  await tx.query(
+    `insert into kanban.assignment_requests (card_id, board_id, assignees, requested_by, requested_at)
+     values ($1, $2, $3, $4, now())
+     on conflict (card_id) do update set assignees = excluded.assignees, requested_by = excluded.requested_by,
+       requested_at = excluded.requested_at`,
+    [cardId, boardId, JSON.stringify(people), user.id],
+  )
+}
+
+/** Assignments on a board that wait for its owner, oldest first. Anyone on the board can see them. */
+export async function listAssignmentRequests(db: Db, user: User, boardId: string): Promise<ApiAssignmentRequest[]> {
+  await requireRole(db, boardId, user.id, canRead)
+  const { rows } = await db.query<RequestDbRow>(
+    `select ${requestColumns} where r.board_id = $1 order by r.requested_at, r.card_id`,
+    [boardId],
+  )
+  return rows.map((row) => ({ cardId: row.card_id, ...pendingOf(row) }))
+}
+
+/** The board owner approves a waiting assignment: the card gets those assignees, and new names join the team. */
+export async function approveAssignment(db: Db, user: User, boardId: string, cardId: string) {
+  await db.transaction(async (tx) => {
+    await requireRole(tx, boardId, user.id, ['owner'])
+    await lockBoard(tx, boardId)
+    const { rows } = await tx.query<{ assignees: ApiPendingAssignment['assignees'] }>(
+      'delete from kanban.assignment_requests where card_id = $1 and board_id = $2 returning assignees',
+      [cardId, boardId],
+    )
+    if (!rows[0]) fail(404, 'No assignment is waiting for that card')
+    const team = (await tx.query<{ team: TeamMember[] }>('select team from kanban.boards where id = $1', [boardId]))
+      .rows[0].team
+    // People still on the team by id; anyone removed since then is matched (or added) by name.
+    const refs = rows[0].assignees.map((p) => (p.id && team.some((m) => m.id === p.id) ? p.id : p.name))
+    const ids = await resolveAssignees(tx, boardId, refs)
+    await tx.query('update kanban.cards set assignee_ids = $3, updated_at = $4 where id = $1 and board_id = $2', [
+      cardId,
+      boardId,
+      JSON.stringify(ids),
+      Date.now(),
+    ])
+  })
+}
+
+/** The board owner turns down a waiting assignment; the card stays as it is. */
+export async function rejectAssignment(db: Db, user: User, boardId: string, cardId: string) {
+  await requireRole(db, boardId, user.id, ['owner'])
+  const { rows } = await db.query(
+    'delete from kanban.assignment_requests where card_id = $1 and board_id = $2 returning card_id',
+    [cardId, boardId],
+  )
+  if (!rows[0]) fail(404, 'No assignment is waiting for that card')
 }
 
 /**
@@ -659,7 +810,12 @@ export async function findCards(db: Db, user: User, query: CardQuery): Promise<A
      limit ${param(query.limit)}`,
     params,
   )
-  return rows.map((row) => toApiCard(row, { id: row.column_id, title: row.column_title }, row.labels, row.team))
+  const pending = rows.length
+    ? await pendingByCard(db, 'r.card_id = any($1)', [rows.map((r) => r.id)])
+    : new Map<string, ApiPendingAssignment>()
+  return rows.map((row) =>
+    toApiCard(row, { id: row.column_id, title: row.column_title }, row.labels, row.team, pending.get(row.id)),
+  )
 }
 
 // --- Team and workload ---

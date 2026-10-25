@@ -1674,3 +1674,44 @@ textarea.masked {
   padding: 48px 16px;
   text-align: center;
 }
+
+/* Assignments from MCP waiting for the board owner */
+.notice-assign {
+  border-left: 3px solid var(--accent);
+}
+.assign-pending {
+  color: var(--accent);
+  border: 1px dashed currentColor;
+}
+.assign-list li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.assign-list li:last-child {
+  border-bottom: none;
+}
+.link.assign-card {
+  align-self: flex-start;
+  font-weight: 600;
+  text-align: left;
+}
+.pending-assign {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: 0.85rem;
+}
+.pending-assign > span:first-child {
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pending-assign-actions {
+  display: flex;
+  gap: 6px;
+}

@@ -77,6 +77,7 @@ Send the key in an `X-API-Key: kbn_...` header (`Authorization: Bearer kbn_...` 
 
 - **REST API** at `/api/v1`, described by `/api/v1/openapi.json` (OpenAPI 3).
 - **MCP server** at `/api/mcp` (Streamable HTTP), for AI agents. Tools: `list_boards`, `get_board`, `create_board`, `rename_board`, `add_column`, `update_column`, `delete_column`, `find_cards`, `get_card`, `create_card`, `update_card`, `move_card`, `add_progress_note`, `delete_card`, `get_workload`, `set_team_member`, `remove_team_member`. Deleting a whole board is left to the REST API and the app.
+- **Assignments through MCP need the board owner's approval.** When an agent assigns a card (`create_card` or `update_card` with `assignees`), the card keeps its assignees and the request waits: the card shows **⏳ Assignment pending**, the board shows a notice, and the owner approves or rejects it under **Review** or in the card dialog. Other changes in the same call apply right away. Names the team doesn't have yet join it only on approval, and a newer request for the same card replaces the older one. Agents see the request as `pendingAssignment` on the card. Approving works only in the app, never with an API key or an MCP token. Assignments through the REST API still apply right away.
 
 | Request | What it does |
 | --- | --- |

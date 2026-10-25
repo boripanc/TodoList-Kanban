@@ -8,6 +8,7 @@ import { priorityLabel } from '../lib/priority'
 import { isExpanded, setExpanded, type ExpandablePart } from '../lib/expanded'
 import { useStore } from '../state/context'
 import { AvatarStack } from './Team'
+import { useCloud } from '../cloud/context'
 
 interface CardViewProps {
   card: Card
@@ -22,6 +23,8 @@ interface CardViewProps {
   onToggleChecklist?: () => void
   /** Tick or untick a checklist item; left out where items can't be changed. */
   onToggleItem?: (itemId: string) => void
+  /** An assignment asked for through MCP is waiting for the board owner. */
+  assignmentPending?: boolean
 }
 
 const shortDate = (at: number) => new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
@@ -117,6 +120,7 @@ export function CardView({
   checklistOpen = false,
   onToggleChecklist,
   onToggleItem,
+  assignmentPending = false,
 }: CardViewProps) {
   const cardLabels = labels.filter((label) => card.labelIds.includes(label.id))
   const doneCount = card.checklist.filter((item) => item.done).length
@@ -147,6 +151,7 @@ export function CardView({
         card.estimateDays ||
         card.checklist.length > 0 ||
         card.description ||
+        assignmentPending ||
         assignees.length > 0) && (
         <div className="card-meta">
           {card.priority !== 'none' && (
@@ -204,6 +209,11 @@ export function CardView({
               ≡
             </span>
           )}
+          {assignmentPending && (
+            <span className="badge assign-pending" title="An assignment is waiting for the board owner to approve it">
+              ⏳ Assignment pending
+            </span>
+          )}
           {assignees.length > 0 && <AvatarStack people={assignees} />}
         </div>
       )}
@@ -225,6 +235,8 @@ interface CardItemProps {
 
 export function CardItem({ card, labels, team, onOpen, readOnly = false }: CardItemProps) {
   const { dispatch } = useStore()
+  const cloud = useCloud()
+  const assignmentPending = !!cloud?.assignmentRequests.some((r) => r.cardId === card.id)
   const [progressOpen, setProgressOpen] = useState(() => isExpanded('progress', card.id))
   const [checklistOpen, setChecklistOpen] = useState(() => isExpanded('checklist', card.id))
   const toggle = (part: ExpandablePart, open: boolean, set: (open: boolean) => void) => () => {
@@ -260,6 +272,7 @@ export function CardItem({ card, labels, team, onOpen, readOnly = false }: CardI
         onToggleProgress={toggle('progress', progressOpen, setProgressOpen)}
         checklistOpen={checklistOpen}
         onToggleChecklist={toggle('checklist', checklistOpen, setChecklistOpen)}
+        assignmentPending={assignmentPending}
         onToggleItem={
           readOnly
             ? undefined

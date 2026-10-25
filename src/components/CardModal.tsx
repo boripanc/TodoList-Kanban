@@ -10,6 +10,8 @@ import { NewLabelForm } from './LabelEditor'
 import { priorityLabel } from '../lib/priority'
 import { ProgressEditor } from './ProgressEditor'
 import { AssigneePicker } from './Team'
+import { PendingAssignment } from './Assignments'
+import { useCloud } from '../cloud/context'
 
 const priorities: Priority[] = ['none', 'low', 'medium', 'high', 'urgent']
 
@@ -25,6 +27,7 @@ export function CardModal({
   readOnly?: boolean
 }) {
   const { state, dispatch } = useStore()
+  const cloud = useCloud()
   const [newItem, setNewItem] = useState('')
   const [title, setTitle] = useState(card.title)
   const [description, setDescription] = useState(card.description)
@@ -178,6 +181,7 @@ export function CardModal({
             </label>
 
             <AssigneePicker board={board} card={card} readOnly={readOnly} />
+            <PendingAssignment cloud={cloud} board={board} card={card} />
 
             <label className="field">
               <span>Priority</span>
