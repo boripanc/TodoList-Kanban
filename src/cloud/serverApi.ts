@@ -1,5 +1,6 @@
 import type {
   ApiKey,
+  AssignmentRequest,
   CloudApi,
   ConnectedApp,
   CloudUser,
@@ -139,6 +140,15 @@ export function createServerApi(base: string): CloudApi {
     },
     async joinWithLink(token) {
       return (await call<{ boardId: string }>('POST', '/join', { token })).boardId
+    },
+
+    listAssignmentRequests: (boardId) =>
+      call<AssignmentRequest[]>('GET', `/boards/${enc(boardId)}/assignment-requests`),
+    async approveAssignment(boardId, cardId) {
+      await call('POST', `/boards/${enc(boardId)}/assignment-requests/${enc(cardId)}/approve`)
+    },
+    async rejectAssignment(boardId, cardId) {
+      await call('POST', `/boards/${enc(boardId)}/assignment-requests/${enc(cardId)}/reject`)
     },
 
     listApiKeys: () => call<ApiKey[]>('GET', '/api-keys'),

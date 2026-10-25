@@ -872,7 +872,12 @@ describe('MCP endpoint', () => {
     const call = async (name: string, args: object) =>
       JSON.parse((await rpc(n8n, 'tools/call', { name, arguments: args })).data.result.content[0].text)
     expect(await call('set_team_member', { boardId: 'b1', member: 'Kim', capacity: 1 })).toMatchObject({ name: 'Kim', capacity: 1 })
-    expect(await call('update_card', { cardId: 'c1', assignees: ['Kim'] })).toMatchObject({ assignees: [{ name: 'Kim' }] })
+    // Assigning through MCP waits for the owner (see "assignment approval" below).
+    expect(await call('update_card', { cardId: 'c1', assignees: ['Kim'] })).toMatchObject({
+      assignees: [],
+      pendingAssignment: { assignees: [{ name: 'Kim' }] },
+    })
+    expect((await n8n.call('PATCH', '/v1/cards/c1', { assignees: ['Kim'] })).status).toBe(200)
     expect(await call('find_cards', { assignee: 'Kim' })).toHaveLength(1)
     const load = await call('get_workload', { boardId: 'b1' })
     expect(load.members).toEqual([expect.objectContaining({ name: 'Kim', openCount: 1, level: 'full' })])
@@ -964,6 +969,117 @@ describe('MCP endpoint', () => {
     expect((await app.request('/', { method: 'DELETE' })).status).toBe(405)
     expect((await app.request('/api/mcp/', { headers: { 'x-api-key': n8n.key } })).status).toBe(405)
     expect((await app.request('/', { headers: { accept: 'text/html' } })).status).not.toBe(405)
+  })
+})
+
+describe('assignment approval', () => {
+  const tool = async (n8n: Awaited<ReturnType<typeof apiKeyFor>>, name: string, args: object) => {
+    const res = await n8n.call(
+      'POST',
+      '/mcp',
+      { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } },
+      { accept: 'application/json, text/event-stream' },
+    )
+    const { isError, content } = res.data.result
+    return { isError: !!isError, data: isError ? content[0].text : JSON.parse(content[0].text) }
+  }
+
+  it('holds assignments made through MCP until the owner approves them', async () => {
+    const ana = await ownerWithBoard()
+    const claude = await apiKeyFor(ana, 'Claude')
+    await claude.call('PUT', '/v1/boards/b1/team/Kim', {})
+
+    const updated = await tool(claude, 'update_card', { cardId: 'c1', assignees: ['kim', 'Lee'], priority: 'low' })
+    expect(updated.isError).toBe(false)
+    // Other fields change right away; the assignees don't, and Lee doesn't join the team yet.
+    expect(updated.data).toMatchObject({
+      priority: 'low',
+      assignees: [],
+      pendingAssignment: {
+        assignees: [{ id: expect.any(String), name: 'Kim' }, { id: null, name: 'Lee' }],
+        requestedBy: 'ana@example.com',
+      },
+    })
+    const stored = (await ana.call('GET', '/boards/b1')).data
+    expect(stored.cards[0].assignee_ids).toEqual([])
+    expect(stored.board.team.map((m: { name: string }) => m.name)).toEqual(['Kim'])
+
+    const listed = await ana.call('GET', '/boards/b1/assignment-requests')
+    expect(listed.data).toEqual([
+      expect.objectContaining({ cardId: 'c1', assignees: updated.data.pendingAssignment.assignees }),
+    ])
+    expect((await tool(claude, 'get_card', { cardId: 'c1' })).data.pendingAssignment).not.toBeNull()
+
+    expect((await ana.call('POST', '/boards/b1/assignment-requests/c1/approve', {})).status).toBe(200)
+    const approved = (await ana.call('GET', '/boards/b1')).data
+    expect(approved.board.team.map((m: { name: string }) => m.name)).toEqual(['Kim', 'Lee'])
+    expect(approved.cards[0].assignee_ids).toEqual(approved.board.team.map((m: { id: string }) => m.id))
+    expect((await ana.call('GET', '/boards/b1/assignment-requests')).data).toEqual([])
+    expect((await tool(claude, 'get_card', { cardId: 'c1' })).data.pendingAssignment).toBeNull()
+    expect((await ana.call('POST', '/boards/b1/assignment-requests/c1/approve', {})).status).toBe(404)
+  })
+
+  it('creates MCP cards unassigned with a request, replaces older requests and lets the owner reject', async () => {
+    const ana = await ownerWithBoard()
+    const claude = await apiKeyFor(ana, 'Claude')
+    const created = await tool(claude, 'create_card', { boardId: 'b1', column: 'To do', title: 'Hotel', assignees: ['Kim'] })
+    expect(created.data).toMatchObject({ assignees: [], pendingAssignment: { assignees: [{ id: null, name: 'Kim' }] } })
+    const id = created.data.id as string
+
+    await tool(claude, 'update_card', { cardId: id, assignees: ['Lee'] })
+    const requests = (await ana.call('GET', '/boards/b1/assignment-requests')).data
+    expect(requests).toEqual([expect.objectContaining({ cardId: id, assignees: [{ id: null, name: 'Lee' }] })])
+
+    // Asking for what the card already has drops the request.
+    await tool(claude, 'update_card', { cardId: id, assignees: [] })
+    expect((await ana.call('GET', '/boards/b1/assignment-requests')).data).toEqual([])
+
+    await tool(claude, 'update_card', { cardId: id, assignees: ['Lee'] })
+    // Settling a request (which changes no card) still tells open apps, so the owner's other devices update.
+    const stop = await events.start()
+    received = []
+    expect((await ana.call('POST', `/boards/b1/assignment-requests/${id}/reject`, {})).status).toBe(200)
+    await new Promise((r) => setTimeout(r, 50))
+    await stop()
+    expect(received).toContainEqual({ userId: ana.user.id, event: { type: 'board', boardId: 'b1' } })
+    const after = (await ana.call('GET', '/boards/b1')).data
+    expect(after.cards.find((c: { id: string }) => c.id === id).assignee_ids).toEqual([])
+    expect(after.board.team).toEqual([])
+    expect((await ana.call('GET', '/boards/b1/assignment-requests')).data).toEqual([])
+
+    // A deleted card takes its request with it.
+    await tool(claude, 'update_card', { cardId: id, assignees: ['Lee'] })
+    await claude.call('DELETE', `/v1/cards/${id}`)
+    expect((await ana.call('GET', '/boards/b1/assignment-requests')).data).toEqual([])
+  })
+
+  it('only lets the board owner approve or reject, and only in the app', async () => {
+    const ana = await ownerWithBoard()
+    const ben = await share(ana, 'ben@example.com', 'editor')
+    const cy = await share(ana, 'cy@example.com', 'viewer')
+    const stranger = await signUp('dee@example.com')
+    const bensKey = await apiKeyFor(ben)
+    const anasKey = await apiKeyFor(ana)
+
+    // An editor's agent can ask too; it still waits for the owner.
+    expect((await tool(bensKey, 'update_card', { cardId: 'c1', assignees: ['Kim'] })).data.pendingAssignment).toMatchObject({
+      requestedBy: 'ben@example.com',
+    })
+    const cyKey = await apiKeyFor(cy)
+    expect((await tool(cyKey, 'update_card', { cardId: 'c1', assignees: ['Kim'] })).isError).toBe(true)
+
+    expect((await cy.call('GET', '/boards/b1/assignment-requests')).data).toHaveLength(1)
+    expect((await stranger.call('GET', '/boards/b1/assignment-requests')).status).toBe(404)
+    for (const who of [ben, cy]) {
+      expect((await who.call('POST', '/boards/b1/assignment-requests/c1/approve', {})).status).toBe(403)
+      expect((await who.call('POST', '/boards/b1/assignment-requests/c1/reject', {})).status).toBe(403)
+    }
+    expect((await stranger.call('POST', '/boards/b1/assignment-requests/c1/approve', {})).status).toBe(404)
+    // The owner's own API key can't approve either: approval happens in the app.
+    expect((await anasKey.call('POST', '/boards/b1/assignment-requests/c1/approve')).status).toBe(403)
+    expect((await anasKey.call('POST', '/boards/b1/assignment-requests/c1/reject')).status).toBe(403)
+    expect((await ana.call('GET', '/boards/b1/assignment-requests')).data).toHaveLength(1)
+    expect((await ana.call('POST', '/boards/b1/assignment-requests/c1/reject', {})).status).toBe(200)
   })
 })
 

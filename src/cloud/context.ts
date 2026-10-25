@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react'
 import type { Action } from '../state/reducer'
-import type { CloudApi, CloudUser, ReceivedInvite } from './api'
+import type { AssignmentRequest, CloudApi, CloudUser, ReceivedInvite } from './api'
 
 export interface Cloud {
   api: CloudApi
@@ -23,6 +23,12 @@ export interface Cloud {
   leaveBoard: (boardId: string) => Promise<void>
   acceptInvite: (inviteId: string) => Promise<void>
   declineInvite: (inviteId: string) => Promise<void>
+  /** Assignments on the current board that wait for its owner (asked for through MCP), oldest first. */
+  assignmentRequests: AssignmentRequest[]
+  /** Owner only: give the card the requested assignees. */
+  approveAssignment: (cardId: string) => Promise<void>
+  /** Owner only: turn the request down; the card stays as it is. */
+  rejectAssignment: (cardId: string) => Promise<void>
   /** Resolves once changes made so far have reached the server. */
   saved: () => Promise<void>
   /** Reload boards and invitations from the server. */

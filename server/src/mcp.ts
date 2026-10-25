@@ -78,7 +78,7 @@ const assignees = {
   type: 'array',
   items: { type: 'string' },
   description:
-    'Team member names or ids the card is assigned to. Names the board team does not have yet join the team. Replaces the assignees; [] unassigns everyone.',
+    'Team member names or ids to assign the card to; replaces the assignees, [] unassigns everyone. Assignments made here need the board owner to approve them in the app: until then the card keeps its assignees and shows the request under pendingAssignment. Names the board team does not have yet join the team once approved.',
 }
 const member = text('Team member name or id, from get_board (team).')
 const cardFields = {
@@ -215,7 +215,7 @@ export const tools: Tool[] = [
     annotations: {},
     run: (db, user, a) => {
       const { boardId: id, ...rest } = a
-      return k.createCard(db, user, v.ref(id, 'boardId'), v.cardInput(rest, true))
+      return k.createCard(db, user, v.ref(id, 'boardId'), v.cardInput(rest, true), 'request')
     },
   },
   {
@@ -227,7 +227,7 @@ export const tools: Tool[] = [
     annotations: { idempotentHint: true },
     run: (db, user, a) => {
       const { cardId: id, ...rest } = a
-      return k.updateCard(db, user, v.ref(id, 'cardId'), v.cardInput(rest, false))
+      return k.updateCard(db, user, v.ref(id, 'cardId'), v.cardInput(rest, false), 'request')
     },
   },
   {
@@ -310,7 +310,7 @@ export const tools: Tool[] = [
 
 const INSTRUCTIONS =
   'TodoList Kanban boards. Start with list_boards, then get_board to see columns and cards. ' +
-  'Columns can be named by title. Cards can be assigned to the board team by name; get_workload shows who has what. ' +
+  'Columns can be named by title. Cards can be assigned to the board team by name, but each assignment waits for the board owner to approve it in the app (see pendingAssignment on the card); get_workload shows who has what. ' +
   'You act as the owner of the API key: viewers can only read.'
 
 type Message = { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown }

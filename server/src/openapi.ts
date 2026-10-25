@@ -378,6 +378,26 @@ export function openApiSpec() {
               type: 'array',
               items: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } } },
             },
+            pendingAssignment: {
+              type: 'object',
+              nullable: true,
+              description:
+                'An assignment asked for through MCP, waiting for the board owner to approve it in the app. Assignments through this REST API take effect right away.',
+              properties: {
+                assignees: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string', nullable: true, description: 'Null for a name that joins the team on approval' },
+                      name: { type: 'string' },
+                    },
+                  },
+                },
+                requestedBy: { type: 'string', nullable: true, description: 'Email of the account that asked' },
+                requestedAt: { type: 'string', format: 'date-time' },
+              },
+            },
             checklist: {
               type: 'array',
               items: { type: 'object', properties: { id: { type: 'string' }, text: { type: 'string' }, done: { type: 'boolean' } } },
