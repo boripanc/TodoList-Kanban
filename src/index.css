@@ -1715,3 +1715,159 @@ textarea.masked {
   display: flex;
   gap: 6px;
 }
+
+/* Interfaces and their specs */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.spec-badge {
+  border: 1px solid currentColor;
+}
+.spec-draft {
+  color: var(--muted);
+}
+.spec-review {
+  color: var(--warn);
+}
+.spec-agreed {
+  color: var(--ok);
+}
+.card-endpoint {
+  margin-top: 2px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spec-empty > div {
+  margin-top: 6px;
+}
+.spec-editor {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: var(--surface-2);
+}
+.spec-editor .field textarea,
+.spec-editor .field input {
+  background: var(--surface);
+}
+.spec-editor-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.spec-editor-head h3 {
+  margin: 0 auto 0 0;
+  font-size: 0.95rem;
+}
+.spec-status-select {
+  font-weight: 600;
+}
+.small-button {
+  font-size: 0.8rem;
+  padding: 4px 10px;
+}
+.interface-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.interface-add > input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.interface-add > select {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.interface-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0 16px;
+}
+.interface-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: var(--surface);
+}
+.interface-group > p {
+  margin: 8px 0 0;
+}
+.interface-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+}
+.interface-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.interface-list li.is-done .interface-title {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.interface-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  flex: 1 1 220px;
+}
+.interface-title {
+  text-align: left;
+}
+.interface-endpoint {
+  font-size: 0.78rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.interface-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.spec-route {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.spec-route > fieldset {
+  flex: 1 1 200px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.spec-route > fieldset > legend {
+  padding: 0;
+  margin-bottom: 4px;
+}
+.spec-route-arrow {
+  color: var(--muted);
+  font-weight: 600;
+}

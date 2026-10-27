@@ -30,6 +30,61 @@ export interface ProgressEntry {
   at: number
 }
 
+/**
+ * An SAP Cloud Integration (CPI) adapter: how a message enters CPI on the
+ * sender side, or leaves it on the receiver side.
+ */
+export type AdapterType =
+  | 'idoc'
+  | 'rfc'
+  | 'soap'
+  | 'xi'
+  | 'http'
+  | 'odata'
+  | 'sftp'
+  | 'ftp'
+  | 'mail'
+  | 'as2'
+  | 'as4'
+  | 'jdbc'
+  | 'jms'
+  | 'amqp'
+  | 'kafka'
+  | 'processdirect'
+  | 'successfactors'
+  | 'ariba'
+  | 'ldap'
+  | 'openconnectors'
+  | 'aws'
+  | 'azure'
+  | 'other'
+
+/** Asynchronous (fire and forget) or synchronous (request and reply). */
+export type MessageMode = 'async' | 'sync'
+
+/** Where a spec stands: being written, out for review, or agreed by both sides. */
+export type SpecStatus = 'draft' | 'review' | 'agreed'
+
+/** The technical spec of an integration (CPI iFlow) someone has to build. */
+export interface InterfaceSpec {
+  /** System that sends the message, e.g. "S/4HANA PRD". */
+  senderSystem: string
+  senderAdapter: AdapterType
+  /** System that receives it, e.g. "Salesforce". */
+  receiverSystem: string
+  receiverAdapter: AdapterType
+  mode: MessageMode
+  /** The iFlow name or address, e.g. "/orders/create" or an IDoc type. */
+  endpoint: string
+  /** The source message: structure, sample, IDoc type or file layout. */
+  input: string
+  /** The target message and mapping, response or acknowledgement. */
+  output: string
+  /** Anything else: auth, error handling, retries, volume, schedule. */
+  notes: string
+  status: SpecStatus
+}
+
 export interface Card {
   id: string
   title: string
@@ -49,6 +104,8 @@ export interface Card {
   progress: number | null
   /** Progress updates, oldest first. */
   progressLog: ProgressEntry[]
+  /** Set when the card is an interface to implement; holds its technical spec. */
+  spec: InterfaceSpec | null
   createdAt: number
   updatedAt: number
 }
@@ -76,7 +133,7 @@ export interface Board {
 }
 
 export interface AppState {
-  version: 5
+  version: 6
   boardOrder: string[]
   activeBoardId: string | null
   boards: Record<string, Board>

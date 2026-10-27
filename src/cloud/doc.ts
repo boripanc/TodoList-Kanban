@@ -1,4 +1,4 @@
-import type { AppState, Board, Card, Column, Label, Priority, Role, TeamMember } from '../types'
+import type { AppState, Board, Card, Column, InterfaceSpec, Label, Priority, Role, TeamMember } from '../types'
 
 /** One board with its columns and cards, as stored in the cloud. */
 export interface BoardDoc {
@@ -44,6 +44,8 @@ export interface CardRow {
   /** Left out by apps from before progress existed; the server then keeps what it has. */
   progress?: Card['progress']
   progress_log?: Card['progressLog']
+  /** Left out by apps from before interface specs existed; the server then keeps what it has. */
+  spec?: InterfaceSpec | null
   created_at: number
   updated_at: number
 }
@@ -109,6 +111,7 @@ export function cardRows(doc: BoardDoc): CardRow[] {
           checklist: card.checklist,
           progress: card.progress,
           progress_log: card.progressLog,
+          spec: card.spec,
           created_at: card.createdAt,
           updated_at: card.updatedAt,
         },
@@ -146,6 +149,7 @@ export function docFromRows(board: BoardRow, columnRowList: ColumnRow[], cardRow
         checklist: c.checklist,
         progress: c.progress ?? null,
         progressLog: c.progress_log ?? [],
+        spec: c.spec ?? null,
         createdAt: c.created_at,
         updatedAt: c.updated_at,
       })

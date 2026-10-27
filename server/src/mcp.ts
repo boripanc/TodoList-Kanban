@@ -8,6 +8,7 @@ import type { User } from './access.ts'
 import type { Db } from './db.ts'
 import * as k from './kanban.ts'
 import * as v from './validate.ts'
+import { adapterTypes, messageModes, specStatuses } from '../../src/lib/interfaces.ts'
 
 const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05']
 
@@ -80,6 +81,30 @@ const assignees = {
   description:
     'Team member names or ids to assign the card to; replaces the assignees, [] unassigns everyone. Assignments made here need the board owner to approve them in the app: until then the card keeps its assignees and shows the request under pendingAssignment. Names the board team does not have yet join the team once approved.',
 }
+const adapter = (side: string) => ({
+  type: 'string',
+  enum: adapterTypes,
+  description: `SAP Cloud Integration (CPI) adapter on the ${side} side, e.g. idoc, rfc, soap, xi, http, odata, sftp, as2, jdbc, processdirect.`,
+})
+const spec = {
+  anyOf: [
+    object({
+      senderSystem: text('System that sends the message, e.g. "S/4HANA PRD".'),
+      senderAdapter: adapter('sender'),
+      receiverSystem: text('System that receives it, e.g. "Salesforce".'),
+      receiverAdapter: adapter('receiver'),
+      mode: { type: 'string', enum: messageModes, description: 'async (fire and forget) or sync (request and reply).' },
+      endpoint: text('iFlow name or address, e.g. "/orders/create", an IDoc type or a folder.'),
+      input: text('Source message: structure or sample, IDoc type, file layout (Markdown is fine).'),
+      output: text('Target message and mapping rules, response or acknowledgement (Markdown is fine).'),
+      notes: text('Anything else: auth, error handling, retries, volume, schedule.'),
+      status: { type: 'string', enum: specStatuses, description: 'draft, review (out for review) or agreed.' },
+    }),
+    { type: 'null' },
+  ],
+  description:
+    'Technical spec when the card is an SAP CPI integration someone builds. Only the fields given change; a card without a spec gets one (idoc to http, async, draft by default). null removes the spec.',
+}
 const member = text('Team member name or id, from get_board (team).')
 const cardFields = {
   title: text('Card title.'),
@@ -92,6 +117,7 @@ const cardFields = {
   checklist,
   progress,
   assignees,
+  spec,
 }
 
 export const tools: Tool[] = [
@@ -186,10 +212,11 @@ export const tools: Tool[] = [
       column: text('Only this column (id or title).'),
       label: text('Only cards with this label (name or id).'),
       priority,
-      search: text('Text in the title, notes, checklist or progress updates.'),
+      search: text('Text in the title, notes, checklist, progress updates or interface spec.'),
       dueFrom: text('Due on or after this date, YYYY-MM-DD.'),
       dueTo: text('Due on or before this date, YYYY-MM-DD. Use today for overdue and due today.'),
       assignee: text('Only cards assigned to this team member (name or id), or "none" for unassigned cards.'),
+      interfaces: { type: 'boolean', description: 'Only cards that are interfaces to implement (cards with a spec).' },
       limit: { type: 'integer', minimum: 1, maximum: 500, description: 'Most cards to return (default 100).' },
     }),
     annotations: { readOnlyHint: true },

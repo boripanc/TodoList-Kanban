@@ -265,6 +265,41 @@ describe('boards', () => {
     expect(refused.status).toBe(403)
   })
 
+  it('syncs interface specs, and keeps them when an older app leaves them out', async () => {
+    const ana = await ownerWithBoard()
+    const spec = {
+      senderSystem: 'S/4HANA',
+      senderAdapter: 'idoc',
+      receiverSystem: 'Salesforce',
+      receiverAdapter: 'http',
+      mode: 'async',
+      endpoint: 'ORDERS05',
+      input: '{ sku }',
+      output: '201 { id }',
+      notes: '',
+      status: 'draft',
+    }
+    await ana.call('POST', '/boards/b1/changes', { upsertCards: [{ ...card('c1', 'Orders API', 'col1', 0), spec }] })
+    const stored = () => ana.call('GET', '/boards/b1').then((r) => r.data.cards[0])
+    expect((await stored()).spec).toEqual(spec)
+    await ana.call('POST', '/boards/b1/changes', { upsertCards: [card('c1', 'Orders API v2', 'col1', 0)] })
+    expect(await stored()).toMatchObject({ title: 'Orders API v2', spec })
+    await ana.call('POST', '/boards/b1/changes', { upsertCards: [{ ...card('c1', 'x', 'col1', 0), spec: null }] })
+    expect((await stored()).spec).toBeNull()
+
+    const badKind = await ana.call('POST', '/boards/b1/changes', {
+      upsertCards: [{ ...card('c1', 'x', 'col1', 0), spec: { ...spec, senderAdapter: 'rest' } }],
+    })
+    expect(badKind.status).toBe(400)
+    const partial = await ana.call('POST', '/boards/b1/changes', {
+      upsertCards: [{ ...card('c1', 'x', 'col1', 0), spec: { senderAdapter: 'idoc' } }],
+    })
+    expect(partial.status).toBe(400)
+    const viewer = await share(ana, 'ben@example.com', 'viewer')
+    const refused = await viewer.call('POST', '/boards/b1/changes', { upsertCards: [{ ...card('c1', 'x', 'col1', 0), spec }] })
+    expect(refused.status).toBe(403)
+  })
+
   it('syncs the team and card assignees, and keeps them when an older app leaves them out', async () => {
     const ana = await ownerWithBoard()
     const team = [{ id: 'm1', name: 'Kim', color: '#0090ff', capacity: 2 }]
@@ -708,6 +743,52 @@ describe('REST API (v1)', () => {
     expect((await viewer.call('PATCH', `/v1/cards/${fix.id}`, { estimateDays: 4 })).status).toBe(403)
   })
 
+  it('keeps interface specs on cards and finds interface cards', async () => {
+    const ana = await ownerWithBoard()
+    const n8n = await apiKeyFor(ana)
+    const created = await n8n.call('POST', '/v1/boards/b1/cards', {
+      column: 'To do',
+      title: 'Orders API',
+      spec: { senderSystem: 'S/4HANA', endpoint: 'POST /v1/orders', input: '{ sku, qty }' },
+    })
+    expect(created.status).toBe(201)
+    // Missing fields start empty; IDoc to HTTP, asynchronous and draft by default.
+    expect(created.data.spec).toEqual({
+      senderSystem: 'S/4HANA',
+      senderAdapter: 'idoc',
+      receiverSystem: '',
+      receiverAdapter: 'http',
+      mode: 'async',
+      endpoint: 'POST /v1/orders',
+      input: '{ sku, qty }',
+      output: '',
+      notes: '',
+      status: 'draft',
+    })
+    const id = created.data.id
+    // Only the fields given change.
+    const agreed = await n8n.call('PATCH', `/v1/cards/${id}`, { spec: { output: '201 { id }', status: 'agreed' } })
+    expect(agreed.data.spec).toMatchObject({ endpoint: 'POST /v1/orders', output: '201 { id }', status: 'agreed' })
+    expect((await n8n.call('PATCH', `/v1/cards/${id}`, { title: 'Orders API v1' })).data.spec.status).toBe('agreed')
+
+    expect((await n8n.call('GET', '/v1/cards/c1')).data.spec).toBeNull()
+    const interfaces = await n8n.call('GET', '/v1/boards/b1/cards?interfaces=true')
+    expect(interfaces.data.map((c: { id: string }) => c.id)).toEqual([id])
+    expect((await n8n.call('GET', '/v1/cards?search=qty')).data.map((c: { id: string }) => c.id)).toEqual([id])
+
+    expect((await n8n.call('PATCH', `/v1/cards/${id}`, { spec: { receiverAdapter: 'grpc' } })).status).toBe(400)
+    expect((await n8n.call('PATCH', `/v1/cards/${id}`, { spec: { status: 'done' } })).status).toBe(400)
+    expect((await n8n.call('PATCH', `/v1/cards/${id}`, { spec: 'POST /orders' })).status).toBe(400)
+    expect((await n8n.call('GET', '/v1/cards?interfaces=maybe')).status).toBe(400)
+    const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
+    expect((await viewer.call('GET', `/v1/cards/${id}`)).data.spec.status).toBe('agreed')
+    expect((await viewer.call('PATCH', `/v1/cards/${id}`, { spec: { status: 'draft' } })).status).toBe(403)
+
+    // null removes the spec; the card stays.
+    const plain = await n8n.call('PATCH', `/v1/cards/${id}`, { spec: null })
+    expect(plain.data).toMatchObject({ title: 'Orders API v1', spec: null })
+  })
+
   it('gives API keys their owner’s role on each board', async () => {
     const ana = await ownerWithBoard()
     const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
@@ -911,6 +992,35 @@ describe('MCP endpoint', () => {
       startDate: todayISO(),
       dueDate: dueFromEstimate(todayISO(), 2),
     })
+  })
+
+  it('writes and finds interface specs', async () => {
+    const ana = await ownerWithBoard()
+    const n8n = await apiKeyFor(ana)
+    const call = async (n: typeof n8n, name: string, args: object) => {
+      const res = (await rpc(n, 'tools/call', { name, arguments: args })).data.result
+      return res.isError ? { error: res.content[0].text } : JSON.parse(res.content[0].text)
+    }
+    const { tools } = (await rpc(n8n, 'tools/list')).data.result
+    const update = tools.find((t: { name: string }) => t.name === 'update_card')
+    expect(Object.keys(update.inputSchema.properties)).toContain('spec')
+
+    const created = await call(n8n, 'create_card', {
+      boardId: 'b1',
+      column: 'To do',
+      title: 'Order placed event',
+      spec: { senderAdapter: 'rfc', receiverAdapter: 'as2', endpoint: 'orders.placed' },
+    })
+    expect(created.spec).toMatchObject({ senderAdapter: 'rfc', receiverAdapter: 'as2', status: 'draft' })
+    expect(await call(n8n, 'update_card', { cardId: created.id, spec: { status: 'review', mode: 'sync' } })).toMatchObject({
+      spec: { senderAdapter: 'rfc', mode: 'sync', status: 'review' },
+    })
+    expect(await call(n8n, 'find_cards', { boardId: 'b1', interfaces: true })).toHaveLength(1)
+    expect((await call(n8n, 'update_card', { cardId: created.id, spec: { mode: 'batch' } })).error).toMatch(/mode/)
+    const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
+    expect((await call(viewer, 'update_card', { cardId: created.id, spec: { status: 'agreed' } })).error).toMatch(
+      /permission/,
+    )
   })
 
   it('returns refusals and bad input as tool errors, and unknown methods as JSON-RPC errors', async () => {
