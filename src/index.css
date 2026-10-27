@@ -1343,20 +1343,40 @@ input[aria-invalid='true'] {
   margin-top: 10px;
 }
 
-.template-option {
+/* .field > .template-option outranks the uppercase .field > label caption style. */
+.field > .template-option {
   display: flex;
   gap: 10px;
   align-items: flex-start;
-  padding: 8px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
   cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: normal;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+  text-align: left;
+}
+.template-option:has(input:checked) {
+  border-color: var(--accent);
+}
+.template-option input[type='radio'] {
+  flex: none;
+  width: auto;
+  margin: 2px 0 0;
 }
 .template-option span {
   display: flex;
   flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
-.new-board .field input {
+.template-option small {
+  font-size: 0.8rem;
+}
+.new-board .field input:not([type='radio']) {
   width: 100%;
 }
 
