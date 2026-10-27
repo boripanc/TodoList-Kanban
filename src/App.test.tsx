@@ -340,7 +340,8 @@ describe('App', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Add interface' }))
     // The form keeps the person picked, for adding several in a row.
     await user.type(within(dialog).getByLabelText('Interface name'), 'Order placed')
-    await user.selectOptions(within(dialog).getByLabelText('Kind'), 'event')
+    await user.selectOptions(within(dialog).getByLabelText('Sender adapter'), 'rfc')
+    await user.selectOptions(within(dialog).getByLabelText('Receiver adapter'), 'soap')
     await user.selectOptions(within(dialog).getByLabelText('Built by'), 'Nobody yet')
     await user.click(within(dialog).getByRole('button', { name: 'Add interface' }))
     const kim = within(dialog).getByRole('region', { name: 'Interfaces: Kim' })
@@ -351,24 +352,28 @@ describe('App', () => {
     await user.click(within(kim).getByRole('button', { name: 'Create order' }))
     const card = screen.getByRole('dialog', { name: 'Edit card: Create order' })
     const spec = within(card).getByRole('region', { name: 'Interface spec' })
-    await user.type(within(spec).getByLabelText('Endpoint / name'), 'POST /v1/orders')
-    await user.type(within(spec).getByLabelText('Input'), 'sku, qty')
+    await user.type(within(spec).getByLabelText('Sender system'), 'S/4HANA')
+    await user.type(within(spec).getByLabelText('Receiver system'), 'Salesforce')
+    await user.selectOptions(within(spec).getByLabelText('Receiver adapter'), 'odata')
+    await user.selectOptions(within(spec).getByLabelText('Message mode'), 'sync')
+    await user.type(within(spec).getByLabelText('iFlow / endpoint'), 'ORDERS05')
+    await user.type(within(spec).getByLabelText('Source message'), 'IDoc ORDERS05')
     await user.selectOptions(within(spec).getByLabelText('Spec status'), 'agreed')
-    expect(within(spec).getByRole('status')).toHaveTextContent('Agreed, but still empty: Output, Notes')
+    expect(within(spec).getByRole('status')).toHaveTextContent('Agreed, but still empty: Target message and mapping, Notes')
     await user.keyboard('{Escape}')
 
     const column = screen.getByRole('region', { name: 'Column: Spec' })
     const face = within(column).getByRole('button', { name: 'Card: Create order' })
-    expect(face).toHaveTextContent('POST /v1/orders')
-    expect(face).toHaveTextContent('API · Agreed')
-    expect(within(column).getByRole('button', { name: 'Card: Order placed' })).toHaveTextContent('Event · Draft')
+    expect(face).toHaveTextContent('S/4HANA → Salesforce')
+    expect(face).toHaveTextContent('IDoc → OData · Agreed')
+    expect(within(column).getByRole('button', { name: 'Card: Order placed' })).toHaveTextContent('RFC → SOAP · Draft')
 
     await user.keyboard('i')
     dialog = screen.getByRole('dialog', { name: 'Interfaces' })
     expect(within(dialog).getByRole('region', { name: 'Interfaces: Kim' })).toHaveTextContent(
       '1 interface · 1 spec agreed · 0 done',
     )
-    expect(dialog).toHaveTextContent('POST /v1/orders')
+    expect(dialog).toHaveTextContent('S/4HANA (IDoc) → Salesforce (OData) · ORDERS05')
   })
 
   it('adds a spec to any card and removes it again', async () => {
@@ -377,9 +382,9 @@ describe('App', () => {
     await user.click(screen.getByText('Fix login timeout'))
     const card = screen.getByRole('dialog', { name: 'Edit card: Fix login timeout' })
     await user.click(within(card).getByRole('button', { name: '+ Add interface spec' }))
-    await user.selectOptions(within(card).getByLabelText('Interface kind'), 'ui')
+    await user.selectOptions(within(card).getByLabelText('Sender adapter'), 'sftp')
     await user.keyboard('{Escape}')
-    expect(screen.getByRole('button', { name: 'Card: Fix login timeout' })).toHaveTextContent('UI · Draft')
+    expect(screen.getByRole('button', { name: 'Card: Fix login timeout' })).toHaveTextContent('SFTP → HTTP · Draft')
 
     await user.click(screen.getByText('Fix login timeout'))
     const again = screen.getByRole('dialog', { name: 'Edit card: Fix login timeout' })

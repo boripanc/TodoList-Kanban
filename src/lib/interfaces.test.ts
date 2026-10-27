@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { InterfaceSpec, TeamMember } from '../types'
-import { applySpecPatch, emptySpec, listInterfaces, missingSpecFields, SPEC_TEXT_MAX, specsMarkdown } from './interfaces'
+import { applySpecPatch, emptySpec, listInterfaces, routeText, missingSpecFields, SPEC_TEXT_MAX, specsMarkdown } from './interfaces'
 
 const team: TeamMember[] = [
   { id: 'm1', name: 'Kim', color: '#0090ff', capacity: 0 },
@@ -29,22 +29,36 @@ describe('interfaces', () => {
     const current = spec({ endpoint: 'GET /a' })
     expect(applySpecPatch(current, undefined)).toBe(current)
     expect(applySpecPatch(current, null)).toBeNull()
-    expect(applySpecPatch(null, { kind: 'ui' })).toEqual(spec({ kind: 'ui' }))
+    expect(applySpecPatch(null, { senderAdapter: 'sftp' })).toEqual(spec({ senderAdapter: 'sftp' }))
     expect(applySpecPatch(current, { status: 'review' })).toEqual(spec({ endpoint: 'GET /a', status: 'review' }))
     expect(applySpecPatch(null, { notes: 'x'.repeat(SPEC_TEXT_MAX + 5) })!.notes).toHaveLength(SPEC_TEXT_MAX)
   })
 
+  it('describes the route from sender to receiver', () => {
+    expect(routeText(spec())).toBe('IDoc → HTTP / REST')
+    expect(routeText(spec({ senderSystem: 'S/4HANA', receiverSystem: 'Salesforce', senderAdapter: 'rfc' }), true)).toBe(
+      'S/4HANA (RFC) → Salesforce (HTTP)',
+    )
+  })
+
   it('names the empty fields and writes all specs as Markdown', () => {
-    expect(missingSpecFields(spec({ endpoint: 'GET /a', input: ' ' }))).toEqual(['Input', 'Output', 'Notes'])
+    expect(missingSpecFields(spec({ senderSystem: 'S/4', receiverSystem: 'CRM', endpoint: 'x', input: ' ' }))).toEqual([
+      'Source message',
+      'Target message and mapping',
+      'Notes',
+    ])
     const list = listInterfaces(team, [
-      { card: card('Create order', ['m1'], spec({ endpoint: 'POST /orders', input: '{ sku }' })), column: 'Spec', done: false },
+      { card: card('Create order', ['m1'], spec({ senderSystem: 'S/4HANA', receiverAdapter: 'odata', endpoint: 'ORDERS05', input: '{ sku }' })), column: 'Spec', done: false },
     ])
     const md = specsMarkdown('Checkout', list)
     expect(md).toContain('# Checkout: interface specs')
     expect(md).toContain('## Kim\n\n### Create order')
-    expect(md).toContain('- Endpoint: `POST /orders`')
-    expect(md).toContain('**Input**\n\n{ sku }')
-    expect(md).not.toContain('**Output**')
+    expect(md).toContain('- Sender: S/4HANA via IDoc')
+    expect(md).toContain('- Receiver: (not set) via OData')
+    expect(md).toContain('- Mode: Asynchronous')
+    expect(md).toContain('- iFlow / endpoint: `ORDERS05`')
+    expect(md).toContain('**Source message**\n\n{ sku }')
+    expect(md).not.toContain('**Target message')
     expect(md).not.toContain('## Lee')
   })
 })

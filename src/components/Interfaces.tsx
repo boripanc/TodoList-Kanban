@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Board, Card, InterfaceKind, InterfaceSpec } from '../types'
+import type { AdapterType, Board, Card, InterfaceSpec, MessageMode } from '../types'
 import { useStore } from '../state/context'
 import { createId } from '../lib/id'
 import { isDoneColumn } from '../lib/done'
 import {
-  interfaceKinds,
-  kindName,
-  kindShort,
+  adapterGroups,
+  adapterName,
+  adapterShort,
   listInterfaces,
+  messageModes,
+  modeName,
+  routeText,
   missingSpecFields,
   specFields,
   specsMarkdown,
@@ -21,12 +24,33 @@ import { Modal } from './Modal'
 type TextKey = (typeof specFields)[number]['key']
 type Drafts = Record<TextKey, string>
 
-const draftsOf = (spec: InterfaceSpec): Drafts => ({
-  endpoint: spec.endpoint,
-  input: spec.input,
-  output: spec.output,
-  notes: spec.notes,
-})
+const draftsOf = (spec: InterfaceSpec): Drafts =>
+  Object.fromEntries(specFields.map((f) => [f.key, spec[f.key]])) as Drafts
+
+/** A CPI adapter picker, grouped like the iFlow editor. */
+function AdapterSelect({
+  value,
+  onChange,
+  label,
+}: {
+  value: AdapterType
+  onChange: (adapter: AdapterType) => void
+  label: string
+}) {
+  return (
+    <select value={value} aria-label={label} onChange={(e) => onChange(e.target.value as AdapterType)}>
+      {adapterGroups.map((g) => (
+        <optgroup key={g.name} label={g.name}>
+          {g.adapters.map((a) => (
+            <option key={a} value={a}>
+              {adapterName[a]}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
+  )
+}
 
 /** The interface spec part of the card dialog: add one, edit it, or take it off. */
 export function SpecEditor({ card, readOnly }: { card: Card; readOnly: boolean }) {
@@ -39,7 +63,9 @@ export function SpecEditor({ card, readOnly }: { card: Card; readOnly: boolean }
     return (
       <div className="field spec-empty">
         <span>Interface spec</span>
-        <small className="muted">For an interface someone has to build: endpoint, input, output and notes.</small>
+        <small className="muted">
+          For an integration someone has to build: sender and receiver, CPI adapters, messages and mapping.
+        </small>
         <div>
           <button type="button" className="button" onClick={() => update({})}>
             + Add interface spec
@@ -75,57 +101,81 @@ function SpecFields({
   useEffect(() => () => commit(), [])
 
   const missing = missingSpecFields({ ...spec, ...drafts })
+  const text = (key: TextKey, hint: string, multiline: boolean, label?: string) =>
+    multiline ? (
+      <textarea
+        className="mono"
+        rows={key === 'notes' ? 3 : 4}
+        value={drafts[key]}
+        placeholder={hint}
+        aria-label={label}
+        onChange={(e) => setDrafts({ ...drafts, [key]: e.target.value })}
+        onBlur={commit}
+      />
+    ) : (
+      <input
+        className={key === 'endpoint' ? 'mono' : undefined}
+        value={drafts[key]}
+        placeholder={hint}
+        aria-label={label}
+        onChange={(e) => setDrafts({ ...drafts, [key]: e.target.value })}
+        onBlur={commit}
+        onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+      />
+    )
+  const field = (key: TextKey) => specFields.find((f) => f.key === key)!
   return (
     <section className="spec-editor" aria-label="Interface spec">
       <div className="spec-editor-head">
         <h3>Interface spec</h3>
-        <label className="spec-select">
-          <span className="sr-only">Interface kind</span>
-          <select value={spec.kind} onChange={(e) => update({ kind: e.target.value as InterfaceKind })}>
-            {interfaceKinds.map((k) => (
-              <option key={k} value={k}>
-                {kindName[k]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="spec-select">
-          <span className="sr-only">Spec status</span>
-          <select
-            className={`spec-status-select spec-${spec.status}`}
-            value={spec.status}
-            onChange={(e) => update({ status: e.target.value as InterfaceSpec['status'] })}
-          >
-            {specStatuses.map((s) => (
-              <option key={s} value={s}>
-                {statusName[s]}
-              </option>
-            ))}
-          </select>
-        </label>
+        <select
+          aria-label="Message mode"
+          value={spec.mode}
+          onChange={(e) => update({ mode: e.target.value as MessageMode })}
+        >
+          {messageModes.map((m) => (
+            <option key={m} value={m}>
+              {modeName[m]}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Spec status"
+          className={`spec-status-select spec-${spec.status}`}
+          value={spec.status}
+          onChange={(e) => update({ status: e.target.value as InterfaceSpec['status'] })}
+        >
+          {specStatuses.map((st) => (
+            <option key={st} value={st}>
+              {statusName[st]}
+            </option>
+          ))}
+        </select>
       </div>
-      {specFields.map((f) => (
-        <label key={f.key} className="field">
-          <span>{f.name}</span>
-          {f.key === 'endpoint' ? (
-            <input
-              className="mono"
-              value={drafts.endpoint}
-              placeholder={f.hint}
-              onChange={(e) => setDrafts({ ...drafts, endpoint: e.target.value })}
-              onBlur={commit}
-              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-            />
-          ) : (
-            <textarea
-              className="mono"
-              rows={f.key === 'notes' ? 3 : 4}
-              value={drafts[f.key]}
-              placeholder={f.hint}
-              onChange={(e) => setDrafts({ ...drafts, [f.key]: e.target.value })}
-              onBlur={commit}
-            />
-          )}
+      <div className="spec-route">
+        <fieldset className="field">
+          <legend>Sender</legend>
+          {text('senderSystem', field('senderSystem').hint, false, 'Sender system')}
+          <AdapterSelect
+            label="Sender adapter"
+            value={spec.senderAdapter}
+            onChange={(senderAdapter) => update({ senderAdapter })}
+          />
+        </fieldset>
+        <fieldset className="field">
+          <legend>Receiver</legend>
+          {text('receiverSystem', field('receiverSystem').hint, false, 'Receiver system')}
+          <AdapterSelect
+            label="Receiver adapter"
+            value={spec.receiverAdapter}
+            onChange={(receiverAdapter) => update({ receiverAdapter })}
+          />
+        </fieldset>
+      </div>
+      {(['endpoint', 'input', 'output', 'notes'] as const).map((key) => (
+        <label key={key} className="field">
+          <span>{field(key).name}</span>
+          {text(key, field(key).hint, key !== 'endpoint')}
         </label>
       ))}
       {spec.status === 'agreed' && missing.length > 0 && (
@@ -159,9 +209,9 @@ export function SpecBadge({ spec }: { spec: InterfaceSpec }) {
   return (
     <span
       className={`badge spec-badge spec-${spec.status}`}
-      title={`${kindName[spec.kind]} interface, spec ${statusName[spec.status].toLowerCase()}`}
+      title={`${routeText(spec)}, ${modeName[spec.mode].toLowerCase()}, spec ${statusName[spec.status].toLowerCase()}`}
     >
-      ⇄ {kindShort[spec.kind]} · {statusName[spec.status]}
+      {adapterShort[spec.senderAdapter]} → {adapterShort[spec.receiverAdapter]} · {statusName[spec.status]}
     </span>
   )
 }
@@ -184,7 +234,15 @@ function InterfaceRows({ items, onOpenCard }: { items: InterfaceItem<Card>[]; on
             <button type="button" className="link interface-title" onClick={() => onOpenCard(card.id)}>
               {card.title}
             </button>
-            {card.spec.endpoint.trim() && <code className="interface-endpoint">{card.spec.endpoint.trim()}</code>}
+            <small className="interface-endpoint">
+              {routeText(card.spec)}
+              {card.spec.endpoint.trim() && (
+                <>
+                  {' · '}
+                  <code>{card.spec.endpoint.trim()}</code>
+                </>
+              )}
+            </small>
           </div>
           <div className="interface-meta">
             <SpecBadge spec={card.spec} />
@@ -210,7 +268,8 @@ export function InterfacesDialog({
 }) {
   const { state, dispatch } = useStore()
   const [title, setTitle] = useState('')
-  const [kind, setKind] = useState<InterfaceKind>('api')
+  const [senderAdapter, setSenderAdapter] = useState<AdapterType>('idoc')
+  const [receiverAdapter, setReceiverAdapter] = useState<AdapterType>('http')
   const [memberId, setMemberId] = useState('')
   const [columnId, setColumnId] = useState(board.columnIds[0] ?? '')
 
@@ -234,7 +293,8 @@ export function InterfacesDialog({
       columnId: target,
       id: createId(),
       title,
-      kind,
+      senderAdapter,
+      receiverAdapter,
       memberId: memberId || null,
       now: Date.now(),
     })
@@ -245,7 +305,7 @@ export function InterfacesDialog({
     <Modal title="Interfaces" onClose={onClose} wide>
       <h2>Interfaces</h2>
       <p className="muted small">
-        What each person has to build, with its technical spec. Open an interface to write or change its spec.
+        The SAP CPI integrations each person builds, with their specs. Open one to write or change its spec.
       </p>
 
       {!readOnly && (
@@ -253,16 +313,14 @@ export function InterfacesDialog({
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="Interface name, e.g. Create order"
+            placeholder="Interface name, e.g. Sales order to Salesforce"
             aria-label="Interface name"
           />
-          <select value={kind} onChange={(e) => setKind(e.target.value as InterfaceKind)} aria-label="Kind">
-            {interfaceKinds.map((k) => (
-              <option key={k} value={k}>
-                {kindName[k]}
-              </option>
-            ))}
-          </select>
+          <AdapterSelect label="Sender adapter" value={senderAdapter} onChange={setSenderAdapter} />
+          <span className="spec-route-arrow" aria-hidden>
+            →
+          </span>
+          <AdapterSelect label="Receiver adapter" value={receiverAdapter} onChange={setReceiverAdapter} />
           <select value={memberId} onChange={(e) => setMemberId(e.target.value)} aria-label="Built by">
             <option value="">Nobody yet</option>
             {board.team.map((m) => (

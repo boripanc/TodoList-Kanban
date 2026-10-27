@@ -267,7 +267,18 @@ describe('boards', () => {
 
   it('syncs interface specs, and keeps them when an older app leaves them out', async () => {
     const ana = await ownerWithBoard()
-    const spec = { kind: 'api', endpoint: 'POST /orders', input: '{ sku }', output: '201 { id }', notes: '', status: 'draft' }
+    const spec = {
+      senderSystem: 'S/4HANA',
+      senderAdapter: 'idoc',
+      receiverSystem: 'Salesforce',
+      receiverAdapter: 'http',
+      mode: 'async',
+      endpoint: 'ORDERS05',
+      input: '{ sku }',
+      output: '201 { id }',
+      notes: '',
+      status: 'draft',
+    }
     await ana.call('POST', '/boards/b1/changes', { upsertCards: [{ ...card('c1', 'Orders API', 'col1', 0), spec }] })
     const stored = () => ana.call('GET', '/boards/b1').then((r) => r.data.cards[0])
     expect((await stored()).spec).toEqual(spec)
@@ -277,11 +288,11 @@ describe('boards', () => {
     expect((await stored()).spec).toBeNull()
 
     const badKind = await ana.call('POST', '/boards/b1/changes', {
-      upsertCards: [{ ...card('c1', 'x', 'col1', 0), spec: { ...spec, kind: 'rpc' } }],
+      upsertCards: [{ ...card('c1', 'x', 'col1', 0), spec: { ...spec, senderAdapter: 'rest' } }],
     })
     expect(badKind.status).toBe(400)
     const partial = await ana.call('POST', '/boards/b1/changes', {
-      upsertCards: [{ ...card('c1', 'x', 'col1', 0), spec: { kind: 'api' } }],
+      upsertCards: [{ ...card('c1', 'x', 'col1', 0), spec: { senderAdapter: 'idoc' } }],
     })
     expect(partial.status).toBe(400)
     const viewer = await share(ana, 'ben@example.com', 'viewer')
@@ -738,12 +749,16 @@ describe('REST API (v1)', () => {
     const created = await n8n.call('POST', '/v1/boards/b1/cards', {
       column: 'To do',
       title: 'Orders API',
-      spec: { endpoint: 'POST /v1/orders', input: '{ sku, qty }' },
+      spec: { senderSystem: 'S/4HANA', endpoint: 'POST /v1/orders', input: '{ sku, qty }' },
     })
     expect(created.status).toBe(201)
-    // Missing fields start empty; kind defaults to api and status to draft.
+    // Missing fields start empty; IDoc to HTTP, asynchronous and draft by default.
     expect(created.data.spec).toEqual({
-      kind: 'api',
+      senderSystem: 'S/4HANA',
+      senderAdapter: 'idoc',
+      receiverSystem: '',
+      receiverAdapter: 'http',
+      mode: 'async',
       endpoint: 'POST /v1/orders',
       input: '{ sku, qty }',
       output: '',
@@ -761,7 +776,7 @@ describe('REST API (v1)', () => {
     expect(interfaces.data.map((c: { id: string }) => c.id)).toEqual([id])
     expect((await n8n.call('GET', '/v1/cards?search=qty')).data.map((c: { id: string }) => c.id)).toEqual([id])
 
-    expect((await n8n.call('PATCH', `/v1/cards/${id}`, { spec: { kind: 'grpc' } })).status).toBe(400)
+    expect((await n8n.call('PATCH', `/v1/cards/${id}`, { spec: { receiverAdapter: 'grpc' } })).status).toBe(400)
     expect((await n8n.call('PATCH', `/v1/cards/${id}`, { spec: { status: 'done' } })).status).toBe(400)
     expect((await n8n.call('PATCH', `/v1/cards/${id}`, { spec: 'POST /orders' })).status).toBe(400)
     expect((await n8n.call('GET', '/v1/cards?interfaces=maybe')).status).toBe(400)
@@ -994,14 +1009,14 @@ describe('MCP endpoint', () => {
       boardId: 'b1',
       column: 'To do',
       title: 'Order placed event',
-      spec: { kind: 'event', endpoint: 'orders.placed' },
+      spec: { senderAdapter: 'rfc', receiverAdapter: 'as2', endpoint: 'orders.placed' },
     })
-    expect(created.spec).toMatchObject({ kind: 'event', endpoint: 'orders.placed', status: 'draft' })
-    expect(await call(n8n, 'update_card', { cardId: created.id, spec: { status: 'review' } })).toMatchObject({
-      spec: { kind: 'event', status: 'review' },
+    expect(created.spec).toMatchObject({ senderAdapter: 'rfc', receiverAdapter: 'as2', status: 'draft' })
+    expect(await call(n8n, 'update_card', { cardId: created.id, spec: { status: 'review', mode: 'sync' } })).toMatchObject({
+      spec: { senderAdapter: 'rfc', mode: 'sync', status: 'review' },
     })
     expect(await call(n8n, 'find_cards', { boardId: 'b1', interfaces: true })).toHaveLength(1)
-    expect((await call(n8n, 'update_card', { cardId: created.id, spec: { kind: 'soap' } })).error).toMatch(/kind/)
+    expect((await call(n8n, 'update_card', { cardId: created.id, spec: { mode: 'batch' } })).error).toMatch(/mode/)
     const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
     expect((await call(viewer, 'update_card', { cardId: created.id, spec: { status: 'agreed' } })).error).toMatch(
       /permission/,

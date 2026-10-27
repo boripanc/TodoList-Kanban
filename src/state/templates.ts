@@ -4,7 +4,7 @@ export type BoardTemplate = 'work' | 'project' | 'personal' | 'blank'
 
 export const templateColumns: Record<BoardTemplate, string[]> = {
   work: ['Backlog', 'To do', 'In progress', 'Review', 'Done'],
-  /** For building a system: each card is an interface someone implements, with its spec. */
+  /** For building a system: each card is an SAP CPI integration someone builds, with its spec. */
   project: ['Spec', 'To implement', 'In progress', 'Review', 'Done'],
   personal: ['To do', 'Doing', 'Done'],
   blank: [],
@@ -30,9 +30,9 @@ export const templateLabels: Record<BoardTemplate, Omit<Label, 'id'>[]> = {
     { name: 'Docs', color: '#12a594' },
   ],
   project: [
-    { name: 'Backend', color: '#0090ff' },
-    { name: 'Frontend', color: '#8e4ec6' },
-    { name: 'Integration', color: '#12a594' },
+    { name: 'Inbound', color: '#0090ff' },
+    { name: 'Outbound', color: '#8e4ec6' },
+    { name: 'Mapping', color: '#12a594' },
     { name: 'Blocked', color: '#e5484d' },
   ],
   personal: [

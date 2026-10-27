@@ -1,6 +1,6 @@
 import type { BoardOps, BoardRow, CardRow, ColumnRow } from '../../src/cloud/doc.ts'
 import type { InterfaceSpec, ProgressEntry, TeamMember } from '../../src/types.ts'
-import { interfaceKinds, SPEC_TEXT_MAX, specStatuses } from '../../src/lib/interfaces.ts'
+import { adapterTypes, messageModes, SPEC_TEXT_MAX, specFields, specStatuses } from '../../src/lib/interfaces.ts'
 import type { ContactInput, CredentialField, CredentialInput } from '../../src/cloud/api.ts'
 import { credentialKinds, type CredentialKind } from '../../src/lib/credentials.ts'
 import { MAX_ESTIMATE_DAYS } from '../../src/lib/schedule.ts'
@@ -52,17 +52,20 @@ function estimate(value: unknown, what: string): number | null {
 export function specPatch(value: unknown, what: string): Partial<InterfaceSpec> {
   const s = obj(value, what)
   const patch: Partial<InterfaceSpec> = {}
-  if (s.kind !== undefined) {
-    if (!interfaceKinds.includes(s.kind as InterfaceSpec['kind']))
-      throw new BadRequest(`${what} kind must be one of ${interfaceKinds.join(', ')}`)
-    patch.kind = s.kind as InterfaceSpec['kind']
+  const oneOf = <T extends string>(key: keyof InterfaceSpec, allowed: readonly T[]): T | undefined => {
+    if (s[key] === undefined) return undefined
+    if (!allowed.includes(s[key] as T)) throw new BadRequest(`${what} ${key} must be one of ${allowed.join(', ')}`)
+    return s[key] as T
   }
-  if (s.status !== undefined) {
-    if (!specStatuses.includes(s.status as InterfaceSpec['status']))
-      throw new BadRequest(`${what} status must be one of ${specStatuses.join(', ')}`)
-    patch.status = s.status as InterfaceSpec['status']
-  }
-  for (const key of ['endpoint', 'input', 'output', 'notes'] as const) {
+  const senderAdapter = oneOf('senderAdapter', adapterTypes)
+  const receiverAdapter = oneOf('receiverAdapter', adapterTypes)
+  const mode = oneOf('mode', messageModes)
+  const status = oneOf('status', specStatuses)
+  if (senderAdapter) patch.senderAdapter = senderAdapter
+  if (receiverAdapter) patch.receiverAdapter = receiverAdapter
+  if (mode) patch.mode = mode
+  if (status) patch.status = status
+  for (const { key } of specFields) {
     if (s[key] !== undefined) patch[key] = str(s[key], `${what} ${key}`, SPEC_TEXT_MAX)
   }
   return patch
@@ -72,9 +75,10 @@ export function specPatch(value: unknown, what: string): Partial<InterfaceSpec> 
 function spec(value: unknown): InterfaceSpec | null {
   if (value === null) return null
   const p = specPatch(value, 'spec')
-  if (!p.kind || !p.status || p.endpoint === undefined || p.input === undefined || p.output === undefined || p.notes === undefined)
-    throw new BadRequest('spec needs kind, status, endpoint, input, output and notes')
-  return { kind: p.kind, endpoint: p.endpoint, input: p.input, output: p.output, notes: p.notes, status: p.status }
+  const keys = ['senderAdapter', 'receiverAdapter', 'mode', 'status', ...specFields.map((f) => f.key)] as const
+  const missing = keys.filter((k) => p[k] === undefined)
+  if (missing.length) throw new BadRequest(`spec needs ${missing.join(', ')}`)
+  return p as InterfaceSpec
 }
 
 function arr(value: unknown, what: string, max = 1000): unknown[] {

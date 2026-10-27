@@ -8,7 +8,7 @@ import type { User } from './access.ts'
 import type { Db } from './db.ts'
 import * as k from './kanban.ts'
 import * as v from './validate.ts'
-import { interfaceKinds, specStatuses } from '../../src/lib/interfaces.ts'
+import { adapterTypes, messageModes, specStatuses } from '../../src/lib/interfaces.ts'
 
 const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05']
 
@@ -81,20 +81,29 @@ const assignees = {
   description:
     'Team member names or ids to assign the card to; replaces the assignees, [] unassigns everyone. Assignments made here need the board owner to approve them in the app: until then the card keeps its assignees and shows the request under pendingAssignment. Names the board team does not have yet join the team once approved.',
 }
+const adapter = (side: string) => ({
+  type: 'string',
+  enum: adapterTypes,
+  description: `SAP Cloud Integration (CPI) adapter on the ${side} side, e.g. idoc, rfc, soap, xi, http, odata, sftp, as2, jdbc, processdirect.`,
+})
 const spec = {
   anyOf: [
     object({
-      kind: { type: 'string', enum: interfaceKinds, description: 'What kind of interface it is.' },
-      endpoint: text('Where it lives, e.g. "POST /v1/orders", a topic, a screen or a file path.'),
-      input: text('What goes in: request body, parameters, message or file layout (Markdown is fine).'),
-      output: text('What comes out: response, events emitted, error codes (Markdown is fine).'),
-      notes: text('Anything else: auth, limits, error handling, who calls it.'),
+      senderSystem: text('System that sends the message, e.g. "S/4HANA PRD".'),
+      senderAdapter: adapter('sender'),
+      receiverSystem: text('System that receives it, e.g. "Salesforce".'),
+      receiverAdapter: adapter('receiver'),
+      mode: { type: 'string', enum: messageModes, description: 'async (fire and forget) or sync (request and reply).' },
+      endpoint: text('iFlow name or address, e.g. "/orders/create", an IDoc type or a folder.'),
+      input: text('Source message: structure or sample, IDoc type, file layout (Markdown is fine).'),
+      output: text('Target message and mapping rules, response or acknowledgement (Markdown is fine).'),
+      notes: text('Anything else: auth, error handling, retries, volume, schedule.'),
       status: { type: 'string', enum: specStatuses, description: 'draft, review (out for review) or agreed.' },
     }),
     { type: 'null' },
   ],
   description:
-    'Technical spec when the card is an interface someone implements. Only the fields given change; a card without a spec gets one (kind defaults to api, status to draft). null removes the spec.',
+    'Technical spec when the card is an SAP CPI integration someone builds. Only the fields given change; a card without a spec gets one (idoc to http, async, draft by default). null removes the spec.',
 }
 const member = text('Team member name or id, from get_board (team).')
 const cardFields = {

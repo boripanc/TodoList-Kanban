@@ -30,22 +30,57 @@ export interface ProgressEntry {
   at: number
 }
 
-/** What kind of interface a spec describes. */
-export type InterfaceKind = 'api' | 'event' | 'ui' | 'file' | 'database' | 'other'
+/**
+ * An SAP Cloud Integration (CPI) adapter: how a message enters CPI on the
+ * sender side, or leaves it on the receiver side.
+ */
+export type AdapterType =
+  | 'idoc'
+  | 'rfc'
+  | 'soap'
+  | 'xi'
+  | 'http'
+  | 'odata'
+  | 'sftp'
+  | 'ftp'
+  | 'mail'
+  | 'as2'
+  | 'as4'
+  | 'jdbc'
+  | 'jms'
+  | 'amqp'
+  | 'kafka'
+  | 'processdirect'
+  | 'successfactors'
+  | 'ariba'
+  | 'ldap'
+  | 'openconnectors'
+  | 'aws'
+  | 'azure'
+  | 'other'
+
+/** Asynchronous (fire and forget) or synchronous (request and reply). */
+export type MessageMode = 'async' | 'sync'
 
 /** Where a spec stands: being written, out for review, or agreed by both sides. */
 export type SpecStatus = 'draft' | 'review' | 'agreed'
 
-/** The technical spec of an interface someone has to build. */
+/** The technical spec of an integration (CPI iFlow) someone has to build. */
 export interface InterfaceSpec {
-  kind: InterfaceKind
-  /** Where it lives: e.g. "POST /v1/orders", a topic, a screen or a file path. */
+  /** System that sends the message, e.g. "S/4HANA PRD". */
+  senderSystem: string
+  senderAdapter: AdapterType
+  /** System that receives it, e.g. "Salesforce". */
+  receiverSystem: string
+  receiverAdapter: AdapterType
+  mode: MessageMode
+  /** The iFlow name or address, e.g. "/orders/create" or an IDoc type. */
   endpoint: string
-  /** What goes in: request, parameters, message or file layout. */
+  /** The source message: structure, sample, IDoc type or file layout. */
   input: string
-  /** What comes out: response, events emitted, errors. */
+  /** The target message and mapping, response or acknowledgement. */
   output: string
-  /** Anything else: auth, limits, error handling, who calls it. */
+  /** Anything else: auth, error handling, retries, volume, schedule. */
   notes: string
   status: SpecStatus
 }

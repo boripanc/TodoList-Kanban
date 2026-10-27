@@ -259,19 +259,30 @@ describe('interfaces', () => {
     state = run(
       state,
       { type: 'team/add', boardId: board.id, member: { id: 'm1', name: 'Kim', color: '#0090ff', capacity: 0 } },
-      { type: 'card/addInterface', columnId: board.columnIds[0], id: 'i1', title: ' Create order ', kind: 'api', memberId: 'm1', now },
-      { type: 'card/addInterface', columnId: board.columnIds[0], id: 'i2', title: 'Ghost', kind: 'event', memberId: 'nobody', now },
+      { type: 'card/addInterface', columnId: board.columnIds[0], id: 'i1', title: ' Create order ', senderAdapter: 'idoc', receiverAdapter: 'http', memberId: 'm1', now },
+      { type: 'card/addInterface', columnId: board.columnIds[0], id: 'i2', title: 'Ghost', senderAdapter: 'rfc', receiverAdapter: 'soap', memberId: 'nobody', now },
     )
     expect(state.cards.i1).toMatchObject({
       title: 'Create order',
       assigneeIds: ['m1'],
-      spec: { kind: 'api', endpoint: '', input: '', output: '', notes: '', status: 'draft' },
+      spec: {
+        senderSystem: '',
+        senderAdapter: 'idoc',
+        receiverSystem: '',
+        receiverAdapter: 'http',
+        mode: 'async',
+        endpoint: '',
+        input: '',
+        output: '',
+        notes: '',
+        status: 'draft',
+      },
     })
     // Someone not on the team is left off.
-    expect(state.cards.i2).toMatchObject({ assigneeIds: [], spec: { kind: 'event' } })
+    expect(state.cards.i2).toMatchObject({ assigneeIds: [], spec: { senderAdapter: 'rfc', receiverAdapter: 'soap' } })
     expect(state.columns[board.columnIds[0]].cardIds).toEqual(['i1', 'i2'])
     // Blank titles and taken ids add nothing.
-    const blank = { type: 'card/addInterface', columnId: board.columnIds[0], id: 'i3', title: ' ', kind: 'api', memberId: null, now } as const
+    const blank = { type: 'card/addInterface', columnId: board.columnIds[0], id: 'i3', title: ' ', senderAdapter: 'idoc', receiverAdapter: 'http', memberId: null, now } as const
     expect(reducer(state, blank)).toBe(state)
     expect(reducer(state, { ...blank, id: 'i1', title: 'Again' }).cards.i1.title).toBe('Create order')
   })
@@ -281,7 +292,7 @@ describe('interfaces', () => {
     state = run(state, { type: 'card/add', columnId: board.columnIds[0], id: 'c1', title: 'Orders API', now })
     expect(state.cards.c1.spec).toBeNull()
     state = run(state, { type: 'card/updateSpec', cardId: 'c1', patch: { endpoint: 'POST /orders' }, now: now + 1 })
-    expect(state.cards.c1).toMatchObject({ spec: { kind: 'api', endpoint: 'POST /orders', status: 'draft' }, updatedAt: now + 1 })
+    expect(state.cards.c1).toMatchObject({ spec: { senderAdapter: 'idoc', endpoint: 'POST /orders', status: 'draft' }, updatedAt: now + 1 })
     state = run(state, { type: 'card/updateSpec', cardId: 'c1', patch: { status: 'agreed', output: '201' }, now })
     expect(state.cards.c1.spec).toMatchObject({ endpoint: 'POST /orders', output: '201', status: 'agreed' })
 
@@ -304,7 +315,7 @@ describe('interfaces', () => {
       { type: 'board/setCloud', boardId: board.id, role: 'viewer' },
     )
     expect(reducer(state, { type: 'card/updateSpec', cardId: 'c1', patch: { endpoint: 'x' }, now })).toBe(state)
-    const add = { type: 'card/addInterface', columnId: board.columnIds[0], id: 'i1', title: 'x', kind: 'api', memberId: null, now } as const
+    const add = { type: 'card/addInterface', columnId: board.columnIds[0], id: 'i1', title: 'x', senderAdapter: 'idoc', receiverAdapter: 'http', memberId: null, now } as const
     expect(reducer(state, add)).toBe(state)
   })
 })

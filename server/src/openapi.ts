@@ -1,6 +1,6 @@
 // OpenAPI description of the REST API in server/src/rest.ts, served at
 // GET /api/v1/openapi.json. Keep the two in step.
-import { interfaceKinds, specStatuses } from '../../src/lib/interfaces.ts'
+import { adapterTypes, messageModes, specStatuses } from '../../src/lib/interfaces.ts'
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` })
 const json = (schema: object, description = 'OK') => ({ description, content: { 'application/json': { schema } } })
@@ -33,11 +33,15 @@ const query = (name: string, description: string, schema: object = { type: 'stri
 const priority = { type: 'string', enum: ['none', 'low', 'medium', 'high', 'urgent'] }
 const date = { type: 'string', format: 'date', example: '2026-12-31' }
 const specProperties = {
-  kind: { type: 'string', enum: interfaceKinds },
-  endpoint: { type: 'string', description: 'Where it lives, e.g. "POST /v1/orders", a topic, a screen or a file path' },
-  input: { type: 'string', description: 'Request body, parameters, message or file layout' },
-  output: { type: 'string', description: 'Response, events emitted, error codes' },
-  notes: { type: 'string', description: 'Auth, limits, error handling, who calls it' },
+  senderSystem: { type: 'string', description: 'System that sends the message, e.g. S/4HANA PRD' },
+  senderAdapter: { type: 'string', enum: adapterTypes, description: 'CPI sender adapter' },
+  receiverSystem: { type: 'string', description: 'System that receives it, e.g. Salesforce' },
+  receiverAdapter: { type: 'string', enum: adapterTypes, description: 'CPI receiver adapter' },
+  mode: { type: 'string', enum: messageModes, description: 'async or sync' },
+  endpoint: { type: 'string', description: 'iFlow name or address, IDoc type or folder' },
+  input: { type: 'string', description: 'Source message: structure, sample or file layout' },
+  output: { type: 'string', description: 'Target message and mapping, response or acknowledgement' },
+  notes: { type: 'string', description: 'Auth, error handling, retries, volume, schedule' },
   status: { type: 'string', enum: specStatuses, description: 'draft, review or agreed' },
 }
 const cardFilters = [
@@ -100,7 +104,7 @@ const cardFields = {
     nullable: true,
     properties: specProperties,
     description:
-      'Technical spec when the card is an interface someone implements. Only the fields given change; a card without a spec gets one (kind defaults to api, status to draft). null removes it.',
+      'Technical spec when the card is an interface someone implements. Only the fields given change; a card without a spec gets one (idoc to http, async, draft by default). null removes it.',
   },
   column: { type: 'string', description: 'Column id or title' },
   position: { type: 'integer', minimum: 0, description: '0 = top of the column; default the bottom' },

@@ -1,25 +1,59 @@
-import type { InterfaceKind, InterfaceSpec, SpecStatus, TeamMember } from '../types'
+import type { AdapterType, InterfaceSpec, MessageMode, SpecStatus, TeamMember } from '../types'
 
-export const interfaceKinds: InterfaceKind[] = ['api', 'event', 'ui', 'file', 'database', 'other']
+/** CPI adapters, grouped the way they show in the iFlow editor. */
+export const adapterGroups: { name: string; adapters: AdapterType[] }[] = [
+  { name: 'SAP', adapters: ['idoc', 'rfc', 'xi', 'successfactors', 'ariba'] },
+  { name: 'Web services', adapters: ['soap', 'http', 'odata'] },
+  { name: 'Files and B2B', adapters: ['sftp', 'ftp', 'mail', 'as2', 'as4'] },
+  { name: 'Messaging and data', adapters: ['jms', 'amqp', 'kafka', 'jdbc', 'ldap'] },
+  { name: 'Other', adapters: ['processdirect', 'openconnectors', 'aws', 'azure', 'other'] },
+]
+export const adapterTypes: AdapterType[] = adapterGroups.flatMap((g) => g.adapters)
+export const messageModes: MessageMode[] = ['async', 'sync']
 export const specStatuses: SpecStatus[] = ['draft', 'review', 'agreed']
 
-export const kindName: Record<InterfaceKind, string> = {
-  api: 'API',
-  event: 'Event / message',
-  ui: 'UI screen',
-  file: 'File / batch',
-  database: 'Database',
+export const adapterName: Record<AdapterType, string> = {
+  idoc: 'IDoc',
+  rfc: 'RFC / BAPI',
+  xi: 'XI (PI/PO, S/4 proxy)',
+  successfactors: 'SuccessFactors',
+  ariba: 'Ariba',
+  soap: 'SOAP',
+  http: 'HTTP / REST',
+  odata: 'OData',
+  sftp: 'SFTP',
+  ftp: 'FTP',
+  mail: 'Mail',
+  as2: 'AS2 (EDI)',
+  as4: 'AS4',
+  jms: 'JMS',
+  amqp: 'AMQP',
+  kafka: 'Kafka',
+  jdbc: 'JDBC',
+  ldap: 'LDAP',
+  processdirect: 'ProcessDirect',
+  openconnectors: 'Open Connectors',
+  aws: 'Amazon Web Services',
+  azure: 'Microsoft Azure',
   other: 'Other',
 }
 
 /** Short names for the card face. */
-export const kindShort: Record<InterfaceKind, string> = {
-  api: 'API',
-  event: 'Event',
-  ui: 'UI',
-  file: 'File',
-  database: 'DB',
-  other: 'Interface',
+export const adapterShort: Record<AdapterType, string> = {
+  ...adapterName,
+  rfc: 'RFC',
+  xi: 'XI',
+  successfactors: 'SF',
+  http: 'HTTP',
+  as2: 'AS2',
+  openconnectors: 'OpenConn',
+  aws: 'AWS',
+  azure: 'Azure',
+}
+
+export const modeName: Record<MessageMode, string> = {
+  async: 'Asynchronous',
+  sync: 'Synchronous',
 }
 
 export const statusName: Record<SpecStatus, string> = {
@@ -28,19 +62,42 @@ export const statusName: Record<SpecStatus, string> = {
   agreed: 'Agreed',
 }
 
+type TextKey = 'senderSystem' | 'receiverSystem' | 'endpoint' | 'input' | 'output' | 'notes'
+
 /** What each text field of a spec holds, with a hint shown while it is empty. */
-export const specFields: { key: 'endpoint' | 'input' | 'output' | 'notes'; name: string; hint: string }[] = [
-  { key: 'endpoint', name: 'Endpoint / name', hint: 'e.g. POST /v1/orders, orders.created topic, Checkout screen' },
-  { key: 'input', name: 'Input', hint: 'Request body, parameters, message or file layout' },
-  { key: 'output', name: 'Output', hint: 'Response, events emitted, error codes' },
-  { key: 'notes', name: 'Notes', hint: 'Auth, limits, error handling, who calls it' },
+export const specFields: { key: TextKey; name: string; hint: string }[] = [
+  { key: 'senderSystem', name: 'Sender system', hint: 'e.g. S/4HANA PRD' },
+  { key: 'receiverSystem', name: 'Receiver system', hint: 'e.g. Salesforce' },
+  { key: 'endpoint', name: 'iFlow / endpoint', hint: 'iFlow name, address (/orders/create), IDoc type or folder' },
+  { key: 'input', name: 'Source message', hint: 'Structure or sample, IDoc type, file layout' },
+  { key: 'output', name: 'Target message and mapping', hint: 'Target structure, mapping rules, response or ack' },
+  { key: 'notes', name: 'Notes', hint: 'Auth, error handling, retries, volume, schedule' },
 ]
 
 /** Longest text a spec field may hold. */
 export const SPEC_TEXT_MAX = 20_000
 
-export function emptySpec(kind: InterfaceKind = 'api'): InterfaceSpec {
-  return { kind, endpoint: '', input: '', output: '', notes: '', status: 'draft' }
+export function emptySpec(senderAdapter: AdapterType = 'idoc', receiverAdapter: AdapterType = 'http'): InterfaceSpec {
+  return {
+    senderSystem: '',
+    senderAdapter,
+    receiverSystem: '',
+    receiverAdapter,
+    mode: 'async',
+    endpoint: '',
+    input: '',
+    output: '',
+    notes: '',
+    status: 'draft',
+  }
+}
+
+/** "S/4HANA (IDoc) → Salesforce (HTTP / REST)", leaving out systems not named yet. */
+export function routeText(spec: InterfaceSpec, short = false): string {
+  const names = short ? adapterShort : adapterName
+  const side = (system: string, adapter: AdapterType) =>
+    system.trim() ? `${system.trim()} (${names[adapter]})` : names[adapter]
+  return `${side(spec.senderSystem, spec.senderAdapter)} → ${side(spec.receiverSystem, spec.receiverAdapter)}`
 }
 
 /**
@@ -123,10 +180,16 @@ export function specsMarkdown<C extends SpecCard>(boardTitle: string, list: Inte
     for (const { card, column } of items) {
       const spec = card.spec
       out.push(`### ${card.title}`, '')
-      out.push(`- Kind: ${kindName[spec.kind]}`, `- Spec: ${statusName[spec.status]}`, `- Column: ${column}`)
-      if (spec.endpoint.trim()) out.push(`- Endpoint: \`${spec.endpoint.trim()}\``)
+      out.push(
+        `- Sender: ${spec.senderSystem.trim() || '(not set)'} via ${adapterName[spec.senderAdapter]}`,
+        `- Receiver: ${spec.receiverSystem.trim() || '(not set)'} via ${adapterName[spec.receiverAdapter]}`,
+        `- Mode: ${modeName[spec.mode]}`,
+        `- Spec: ${statusName[spec.status]}`,
+        `- Column: ${column}`,
+      )
+      if (spec.endpoint.trim()) out.push(`- iFlow / endpoint: \`${spec.endpoint.trim()}\``)
       out.push('')
-      for (const field of specFields.slice(1)) {
+      for (const field of specFields.slice(3)) {
         const text = spec[field.key].trim()
         if (text) out.push(`**${field.name}**`, '', text, '')
       }

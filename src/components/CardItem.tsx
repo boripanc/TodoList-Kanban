@@ -146,7 +146,11 @@ export function CardView({
         </div>
       )}
       <div className="card-title">{card.title}</div>
-      {card.spec?.endpoint.trim() && <div className="card-endpoint">{card.spec.endpoint.trim()}</div>}
+      {card.spec && (card.spec.senderSystem.trim() || card.spec.receiverSystem.trim()) && (
+        <div className="card-endpoint">
+          {card.spec.senderSystem.trim() || '?'} → {card.spec.receiverSystem.trim() || '?'}
+        </div>
+      )}
       {(card.spec ||
         card.priority !== 'none' ||
         schedule ||

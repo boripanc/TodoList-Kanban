@@ -1,4 +1,4 @@
-import type { AppState, Board, Card, Column, InterfaceKind, InterfaceSpec, Label, Role, TeamMember } from '../types'
+import type { AppState, Board, Card, Column, AdapterType, InterfaceSpec, Label, Role, TeamMember } from '../types'
 import { extractBoardDoc, type BoardDoc } from '../cloud/doc'
 import { templateColumns, templateLabels, type BoardTemplate } from './templates'
 import { startWorkPatch } from '../lib/schedule'
@@ -36,7 +36,8 @@ export type Action =
       columnId: string
       id: string
       title: string
-      kind: InterfaceKind
+      senderAdapter: AdapterType
+      receiverAdapter: AdapterType
       memberId: string | null
       now: number
     }
@@ -395,7 +396,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const card = added.cards[action.id]
       if (!card) return state
       const onTeam = action.memberId !== null && board.team.some((m) => m.id === action.memberId)
-      const next: Card = { ...card, spec: emptySpec(action.kind), assigneeIds: onTeam ? [action.memberId!] : [] }
+      const next: Card = { ...card, spec: emptySpec(action.senderAdapter, action.receiverAdapter), assigneeIds: onTeam ? [action.memberId!] : [] }
       return { ...added, cards: { ...added.cards, [card.id]: next } }
     }
 
