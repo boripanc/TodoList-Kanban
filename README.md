@@ -4,10 +4,11 @@ A kanban board for work and daily life. It works in the browser with no account,
 
 ## Features
 
-- **Boards**: as many as you like, created from a Work, Daily life or Blank template; rename, delete and switch between them.
+- **Boards**: as many as you like, created from a Work, Project, Daily life or Blank template; rename, delete and switch between them.
 - **Columns**: add, rename (double-click the title), reorder by dragging, delete, clear, and an optional work-in-progress limit that turns the count red when exceeded.
 - **Cards**: quick add, drag within and across columns (mouse, touch press-and-hold, or keyboard), and a detail dialog for title, notes, labels, priority, due date, checklist, duplicate and delete.
 - **Team and workload**: each board has a team (name, color and capacity, the number of open cards someone can take on). Assign cards to one or more people from the card dialog; their avatars show on the card. Filter the board by assignee or unassigned cards, and open **Team** (or press `W`) to see each person's open, overdue and soon-due cards against their capacity, for this board or across all boards. On account boards, people with access can be added to the team in one click.
+- **Interfaces and specs**: for building a system with a team. The **Project** template starts with Spec, To implement, In progress, Review and Done columns. Any card can carry an interface spec: kind (API, event, UI screen, file, database or other), endpoint or name, input, output, notes and a status (Draft, In review, Agreed). Open **Interfaces** (or press `I`) to see each team member's interfaces with their spec status, add new ones for someone, and download every spec as one Markdown file. Cards show the endpoint and spec status on the board.
 - **Labels**: per-board, with colors; manage them from the board menu or create them right in a card.
 - **Due dates**: cards show Overdue, Today and Soon at a glance.
 - **Search and filter**: full-text search over titles, notes and checklists, plus filters by label, priority and due date.
@@ -16,7 +17,7 @@ A kanban board for work and daily life. It works in the browser with no account,
 - **Accounts and sharing** (optional, with your own Postgres): sign in with an email and password, keep boards in your account on every device, invite people by email or with a link as editors or viewers, accept or decline invitations, change roles, remove people or leave a board. Shared boards update live.
 - **Contacts and credentials** (with accounts): a personal address book, and a vault for logins, API keys, bearer tokens, OAuth clients, SSH keys, certificates, database and cloud keys, two-factor secrets or any custom fields. Secret values are encrypted on the server and masked in the app.
 - **Automation** (with accounts): API keys, a REST API and an MCP server, so n8n, scripts and AI agents can manage boards. Claude connects with a sign-in, no key needed.
-- **Keyboard shortcuts**: `/` search, `N` new card, `F` filters, `W` team and workload, `Enter` open card, `Space` pick up and drop, `?` list them all.
+- **Keyboard shortcuts**: `/` search, `N` new card, `F` filters, `W` team and workload, `I` interfaces, `Enter` open card, `Space` pick up and drop, `?` list them all.
 
 ## Getting started
 
@@ -88,8 +89,8 @@ Send the key in an `X-API-Key: kbn_...` header (`Authorization: Bearer kbn_...` 
 | `POST /api/v1/boards/{boardId}/columns` | Add a column: `{"title": "Waiting", "position": 1}` |
 | `PATCH` / `DELETE /api/v1/boards/{boardId}/columns/{column}` | Rename, set the WIP limit or move a column; delete it with its cards. `{column}` is an id or a title |
 | `POST /api/v1/boards/{boardId}/cards` | Add a card: `{"column": "To do", "title": "Call the bank", "priority": "high", "dueDate": "2026-12-01", "labels": ["Finance"], "checklist": ["Find the papers"]}` |
-| `GET /api/v1/cards?search=&label=&assignee=&priority=&column=&dueFrom=&dueTo=&boardId=&limit=` | Find cards on all your boards. `assignee=none` finds unassigned cards |
-| `GET` / `PATCH` / `DELETE /api/v1/cards/{cardId}` | Read, change or delete a card. `PATCH {"column": "Done"}` moves it, `PATCH {"assignees": ["Kim"]}` assigns it; fields you leave out stay as they are |
+| `GET /api/v1/cards?search=&label=&assignee=&priority=&column=&dueFrom=&dueTo=&interfaces=&boardId=&limit=` | Find cards on all your boards. `assignee=none` finds unassigned cards, `interfaces=true` only cards with an interface spec |
+| `GET` / `PATCH` / `DELETE /api/v1/cards/{cardId}` | Read, change or delete a card. `PATCH {"column": "Done"}` moves it, `PATCH {"assignees": ["Kim"]}` assigns it, `PATCH {"spec": {"endpoint": "POST /v1/orders", "status": "agreed"}}` writes part of its interface spec (`"spec": null` removes it); fields you leave out stay as they are |
 | `PUT` / `DELETE /api/v1/boards/{boardId}/team/{member}` | Add or change a team member: `{"capacity": 3}`; remove them (also from their cards). `{member}` is an id or a name |
 | `GET /api/v1/boards/{boardId}/workload`, `GET /api/v1/workload` | Each team member's open cards, overdue and soon-due counts and load against capacity, plus unassigned cards; on one board or all of them |
 

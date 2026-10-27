@@ -317,6 +317,78 @@ describe('App', () => {
     expect(screen.queryByText('Fix login timeout')).not.toBeInTheDocument()
   })
 
+  it('keeps a list of interfaces per member, each with its own spec', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    await user.click(screen.getByRole('button', { name: '+ New board' }))
+    await user.type(screen.getByPlaceholderText('e.g. Home renovation'), 'Checkout')
+    await user.click(screen.getByRole('radio', { name: /Project/ }))
+    await user.click(screen.getByRole('button', { name: 'Create board' }))
+    for (const title of ['Spec', 'To implement', 'In progress', 'Review', 'Done']) {
+      expect(screen.getByRole('region', { name: `Column: ${title}` })).toBeInTheDocument()
+    }
+    await user.click(screen.getByRole('button', { name: 'Team' }))
+    await user.type(screen.getByLabelText('New team member name'), 'Kim')
+    await user.click(screen.getByRole('button', { name: 'Add to team' }))
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+
+    await user.click(screen.getByRole('button', { name: 'Interfaces' }))
+    let dialog = screen.getByRole('dialog', { name: 'Interfaces' })
+    expect(dialog).toHaveTextContent('No interfaces yet')
+    await user.type(within(dialog).getByLabelText('Interface name'), 'Create order')
+    await user.selectOptions(within(dialog).getByLabelText('Built by'), 'Kim')
+    await user.click(within(dialog).getByRole('button', { name: 'Add interface' }))
+    // The form keeps the person picked, for adding several in a row.
+    await user.type(within(dialog).getByLabelText('Interface name'), 'Order placed')
+    await user.selectOptions(within(dialog).getByLabelText('Kind'), 'event')
+    await user.selectOptions(within(dialog).getByLabelText('Built by'), 'Nobody yet')
+    await user.click(within(dialog).getByRole('button', { name: 'Add interface' }))
+    const kim = within(dialog).getByRole('region', { name: 'Interfaces: Kim' })
+    expect(kim).toHaveTextContent('1 interface · 0 specs agreed · 0 done')
+    expect(within(dialog).getByRole('region', { name: 'Interfaces: Nobody yet' })).toHaveTextContent('Order placed')
+
+    // Write the spec in the card dialog.
+    await user.click(within(kim).getByRole('button', { name: 'Create order' }))
+    const card = screen.getByRole('dialog', { name: 'Edit card: Create order' })
+    const spec = within(card).getByRole('region', { name: 'Interface spec' })
+    await user.type(within(spec).getByLabelText('Endpoint / name'), 'POST /v1/orders')
+    await user.type(within(spec).getByLabelText('Input'), 'sku, qty')
+    await user.selectOptions(within(spec).getByLabelText('Spec status'), 'agreed')
+    expect(within(spec).getByRole('status')).toHaveTextContent('Agreed, but still empty: Output, Notes')
+    await user.keyboard('{Escape}')
+
+    const column = screen.getByRole('region', { name: 'Column: Spec' })
+    const face = within(column).getByRole('button', { name: 'Card: Create order' })
+    expect(face).toHaveTextContent('POST /v1/orders')
+    expect(face).toHaveTextContent('API · Agreed')
+    expect(within(column).getByRole('button', { name: 'Card: Order placed' })).toHaveTextContent('Event · Draft')
+
+    await user.keyboard('i')
+    dialog = screen.getByRole('dialog', { name: 'Interfaces' })
+    expect(within(dialog).getByRole('region', { name: 'Interfaces: Kim' })).toHaveTextContent(
+      '1 interface · 1 spec agreed · 0 done',
+    )
+    expect(dialog).toHaveTextContent('POST /v1/orders')
+  })
+
+  it('adds a spec to any card and removes it again', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    await user.click(screen.getByText('Fix login timeout'))
+    const card = screen.getByRole('dialog', { name: 'Edit card: Fix login timeout' })
+    await user.click(within(card).getByRole('button', { name: '+ Add interface spec' }))
+    await user.selectOptions(within(card).getByLabelText('Interface kind'), 'ui')
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('button', { name: 'Card: Fix login timeout' })).toHaveTextContent('UI · Draft')
+
+    await user.click(screen.getByText('Fix login timeout'))
+    const again = screen.getByRole('dialog', { name: 'Edit card: Fix login timeout' })
+    await user.click(within(again).getByRole('button', { name: 'Remove spec' }))
+    expect(within(again).getByRole('button', { name: '+ Add interface spec' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('button', { name: 'Card: Fix login timeout' })).not.toHaveTextContent('Draft')
+  })
+
   it('creates a new board from a template', async () => {
     const user = userEvent.setup()
     renderApp()
@@ -343,7 +415,7 @@ describe('storage', () => {
     )
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 1, cards }))
     const state = loadState()
-    expect(state.version).toBe(5)
+    expect(state.version).toBe(6)
     expect(Object.keys(state.cards)).toEqual(Object.keys(saved.cards))
     for (const card of Object.values(state.cards)) expect(card.progressLog).toEqual([])
   })
@@ -356,7 +428,7 @@ describe('storage', () => {
     const boards = Object.fromEntries(Object.entries(saved.boards).map(([id, { team: _t, ...board }]) => [id, board]))
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 2, boards, cards }))
     const state = loadState()
-    expect(state.version).toBe(5)
+    expect(state.version).toBe(6)
     for (const board of Object.values(state.boards)) expect(board.team).toEqual([])
     for (const card of Object.values(state.cards)) expect(card.assigneeIds).toEqual([])
   })
@@ -368,8 +440,17 @@ describe('storage', () => {
     )
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 4, cards }))
     const state = loadState()
-    expect(state.version).toBe(5)
+    expect(state.version).toBe(6)
     for (const card of Object.values(state.cards)) expect(card.estimateDays).toBeNull()
+  })
+
+  it('upgrades cards saved before interface specs existed', () => {
+    const saved = createSampleState()
+    const cards = Object.fromEntries(Object.entries(saved.cards).map(([id, { spec: _s, ...card }]) => [id, card]))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 5, cards }))
+    const state = loadState()
+    expect(state.version).toBe(6)
+    for (const card of Object.values(state.cards)) expect(card.spec).toBeNull()
   })
 
   it('upgrades cards saved before start dates existed', () => {
@@ -377,7 +458,7 @@ describe('storage', () => {
     const cards = Object.fromEntries(Object.entries(saved.cards).map(([id, { startDate: _s, ...card }]) => [id, card]))
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 3, cards }))
     const state = loadState()
-    expect(state.version).toBe(5)
+    expect(state.version).toBe(6)
     for (const card of Object.values(state.cards)) expect(card.startDate).toBeNull()
   })
 })

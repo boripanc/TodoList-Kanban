@@ -1,7 +1,8 @@
-import type { AppState, Board, Card, Column, Label, Role, TeamMember } from '../types'
+import type { AppState, Board, Card, Column, InterfaceKind, InterfaceSpec, Label, Role, TeamMember } from '../types'
 import { extractBoardDoc, type BoardDoc } from '../cloud/doc'
 import { templateColumns, templateLabels, type BoardTemplate } from './templates'
 import { startWorkPatch } from '../lib/schedule'
+import { applySpecPatch, emptySpec } from '../lib/interfaces'
 
 export type Action =
   | { type: 'board/add'; id: string; title: string; template: BoardTemplate; ids: string[]; now: number }
@@ -24,6 +25,21 @@ export type Action =
   | { type: 'column/clear'; columnId: string }
   | { type: 'card/add'; columnId: string; id: string; title: string; now: number }
   | { type: 'card/update'; cardId: string; patch: Partial<Omit<Card, 'id' | 'createdAt'>>; now: number }
+  /**
+   * Change part of a card's interface spec, giving the card one if it has
+   * none; `patch: null` takes the spec off (the card stays).
+   */
+  | { type: 'card/updateSpec'; cardId: string; patch: Partial<InterfaceSpec> | null; now: number }
+  /** Add an interface to build: a card with an empty spec, optionally assigned to a team member. */
+  | {
+      type: 'card/addInterface'
+      columnId: string
+      id: string
+      title: string
+      kind: InterfaceKind
+      memberId: string | null
+      now: number
+    }
   | { type: 'card/delete'; cardId: string }
   | { type: 'card/duplicate'; cardId: string; newId: string; now: number }
   | { type: 'card/move'; cardId: string; toColumnId: string; toIndex: number }
@@ -47,7 +63,7 @@ export type Action =
   | { type: 'cloud/clear' }
 
 export const initialState: AppState = {
-  version: 5,
+  version: 6,
   boardOrder: [],
   activeBoardId: null,
   boards: {},
@@ -103,8 +119,10 @@ function targetBoardId(state: AppState, action: Action): string | undefined {
     case 'column/update':
     case 'column/clear':
     case 'card/add':
+    case 'card/addInterface':
       return Object.values(state.boards).find((b) => b.columnIds.includes(action.columnId))?.id
     case 'card/update':
+    case 'card/updateSpec':
     case 'card/delete':
     case 'card/duplicate':
     case 'card/move':
@@ -356,6 +374,7 @@ export function reducer(state: AppState, action: Action): AppState {
         checklist: [],
         progress: null,
         progressLog: [],
+        spec: null,
         createdAt: action.now,
         updatedAt: action.now,
       }
@@ -367,6 +386,25 @@ export function reducer(state: AppState, action: Action): AppState {
           [column.id]: { ...column, cardIds: [...column.cardIds, card.id] },
         },
       }
+    }
+
+    case 'card/addInterface': {
+      const board = Object.values(state.boards).find((b) => b.columnIds.includes(action.columnId))
+      if (!board || state.cards[action.id]) return state
+      const added = reducer(state, { type: 'card/add', columnId: action.columnId, id: action.id, title: action.title, now: action.now })
+      const card = added.cards[action.id]
+      if (!card) return state
+      const onTeam = action.memberId !== null && board.team.some((m) => m.id === action.memberId)
+      const next: Card = { ...card, spec: emptySpec(action.kind), assigneeIds: onTeam ? [action.memberId!] : [] }
+      return { ...added, cards: { ...added.cards, [card.id]: next } }
+    }
+
+    case 'card/updateSpec': {
+      const card = state.cards[action.cardId]
+      if (!card) return state
+      if (action.patch === null && card.spec === null) return state
+      const spec = applySpecPatch(card.spec, action.patch)
+      return { ...state, cards: { ...state.cards, [card.id]: { ...card, spec, updatedAt: action.now } } }
     }
 
     case 'card/update': {
@@ -406,6 +444,7 @@ export function reducer(state: AppState, action: Action): AppState {
         labelIds: [...card.labelIds],
         assigneeIds: [...card.assigneeIds],
         checklist: card.checklist.map((item, i) => ({ ...item, id: `${action.newId}-${i}` })),
+        spec: card.spec && { ...card.spec },
         // The copy is a new task: it starts without progress history.
         progress: null,
         progressLog: [],

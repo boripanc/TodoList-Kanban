@@ -1,5 +1,6 @@
 // OpenAPI description of the REST API in server/src/rest.ts, served at
 // GET /api/v1/openapi.json. Keep the two in step.
+import { interfaceKinds, specStatuses } from '../../src/lib/interfaces.ts'
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` })
 const json = (schema: object, description = 'OK') => ({ description, content: { 'application/json': { schema } } })
@@ -31,14 +32,23 @@ const query = (name: string, description: string, schema: object = { type: 'stri
 })
 const priority = { type: 'string', enum: ['none', 'low', 'medium', 'high', 'urgent'] }
 const date = { type: 'string', format: 'date', example: '2026-12-31' }
+const specProperties = {
+  kind: { type: 'string', enum: interfaceKinds },
+  endpoint: { type: 'string', description: 'Where it lives, e.g. "POST /v1/orders", a topic, a screen or a file path' },
+  input: { type: 'string', description: 'Request body, parameters, message or file layout' },
+  output: { type: 'string', description: 'Response, events emitted, error codes' },
+  notes: { type: 'string', description: 'Auth, limits, error handling, who calls it' },
+  status: { type: 'string', enum: specStatuses, description: 'draft, review or agreed' },
+}
 const cardFilters = [
   query('column', 'Column id or title'),
   query('label', 'Label name or id'),
   query('priority', 'Priority', priority),
-  query('search', 'Text in the title, notes or checklist'),
+  query('search', 'Text in the title, notes, checklist, progress updates or interface spec'),
   query('dueFrom', 'Due on or after (YYYY-MM-DD)', date),
   query('dueTo', 'Due on or before (YYYY-MM-DD)', date),
   query('assignee', 'Team member name or id, or "none" for unassigned cards'),
+  query('interfaces', 'true for only cards that are interfaces to implement (cards with a spec)', { type: 'boolean' }),
   query('limit', 'Most cards to return (1-500, default 100)', { type: 'integer', minimum: 1, maximum: 500 }),
 ]
 const cardFields = {
@@ -84,6 +94,13 @@ const cardFields = {
     type: 'array',
     items: { type: 'string' },
     description: 'Team member names or ids; names the team does not have yet join it. Replaces the assignees.',
+  },
+  spec: {
+    type: 'object',
+    nullable: true,
+    properties: specProperties,
+    description:
+      'Technical spec when the card is an interface someone implements. Only the fields given change; a card without a spec gets one (kind defaults to api, status to draft). null removes it.',
   },
   column: { type: 'string', description: 'Column id or title' },
   position: { type: 'integer', minimum: 0, description: '0 = top of the column; default the bottom' },
@@ -415,6 +432,12 @@ export function openApiSpec() {
                   at: { type: 'string', format: 'date-time' },
                 },
               },
+            },
+            spec: {
+              type: 'object',
+              nullable: true,
+              description: 'The technical spec when the card is an interface to implement',
+              properties: specProperties,
             },
             createdAt: { type: 'string', format: 'date-time' },
             updatedAt: { type: 'string', format: 'date-time' },

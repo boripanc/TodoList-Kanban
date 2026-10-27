@@ -9,6 +9,7 @@ import { isExpanded, setExpanded, type ExpandablePart } from '../lib/expanded'
 import { useStore } from '../state/context'
 import { AvatarStack } from './Team'
 import { useCloud } from '../cloud/context'
+import { SpecBadge } from './Interfaces'
 
 interface CardViewProps {
   card: Card
@@ -145,7 +146,9 @@ export function CardView({
         </div>
       )}
       <div className="card-title">{card.title}</div>
-      {(card.priority !== 'none' ||
+      {card.spec?.endpoint.trim() && <div className="card-endpoint">{card.spec.endpoint.trim()}</div>}
+      {(card.spec ||
+        card.priority !== 'none' ||
         schedule ||
         dateProblem ||
         card.estimateDays ||
@@ -154,6 +157,7 @@ export function CardView({
         assignmentPending ||
         assignees.length > 0) && (
         <div className="card-meta">
+          {card.spec && <SpecBadge spec={card.spec} />}
           {card.priority !== 'none' && (
             <span className={`badge priority-${card.priority}`} title="Priority">
               {priorityLabel[card.priority]}

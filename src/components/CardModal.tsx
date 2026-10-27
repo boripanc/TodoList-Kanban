@@ -11,6 +11,7 @@ import { priorityLabel } from '../lib/priority'
 import { ProgressEditor } from './ProgressEditor'
 import { AssigneePicker } from './Team'
 import { PendingAssignment } from './Assignments'
+import { SpecEditor } from './Interfaces'
 import { useCloud } from '../cloud/context'
 
 const priorities: Priority[] = ['none', 'low', 'medium', 'high', 'urgent']
@@ -109,6 +110,8 @@ export function CardModal({
                 onBlur={commitText}
               />
             </label>
+
+            <SpecEditor card={card} readOnly={readOnly} />
 
             <div className="field">
               <span>

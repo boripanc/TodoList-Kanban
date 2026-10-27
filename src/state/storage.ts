@@ -11,7 +11,7 @@ export function isAppState(value: unknown): value is AppState {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
   return (
-    (v.version === 1 || v.version === 2 || v.version === 3 || v.version === 4 || v.version === 5) &&
+    (v.version === 1 || v.version === 2 || v.version === 3 || v.version === 4 || v.version === 5 || v.version === 6) &&
     Array.isArray(v.boardOrder) &&
     typeof v.boards === 'object' &&
     v.boards !== null &&
@@ -25,7 +25,8 @@ export function isAppState(value: unknown): value is AppState {
 /**
  * Bring saved state up to the current version. Version 1 cards had no
  * progress; boards before version 3 had no team and cards no assignees;
- * cards before version 4 had no start date, and before version 5 no estimate.
+ * cards before version 4 had no start date, and before version 5 no estimate,
+ * and before version 6 no interface spec.
  */
 export function migrateState(state: AppState): AppState {
   const cards: AppState['cards'] = {}
@@ -37,11 +38,12 @@ export function migrateState(state: AppState): AppState {
       estimateDays: card.estimateDays ?? null,
       progress: card.progress ?? null,
       progressLog: card.progressLog ?? [],
+      spec: card.spec ?? null,
     }
   }
   const boards: AppState['boards'] = {}
   for (const [id, board] of Object.entries(state.boards)) boards[id] = { ...board, team: board.team ?? [] }
-  return { ...state, version: 5, boards, cards }
+  return { ...state, version: 6, boards, cards }
 }
 
 export function loadState(storage: Storage | undefined = globalThis.localStorage): AppState {

@@ -1,5 +1,6 @@
 import type { BoardOps, BoardRow, CardRow, ColumnRow } from '../../src/cloud/doc.ts'
-import type { ProgressEntry, TeamMember } from '../../src/types.ts'
+import type { InterfaceSpec, ProgressEntry, TeamMember } from '../../src/types.ts'
+import { interfaceKinds, SPEC_TEXT_MAX, specStatuses } from '../../src/lib/interfaces.ts'
 import type { ContactInput, CredentialField, CredentialInput } from '../../src/cloud/api.ts'
 import { credentialKinds, type CredentialKind } from '../../src/lib/credentials.ts'
 import { MAX_ESTIMATE_DAYS } from '../../src/lib/schedule.ts'
@@ -45,6 +46,35 @@ function estimate(value: unknown, what: string): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > MAX_ESTIMATE_DAYS)
     throw new BadRequest(`${what} must be a number of man-days above 0 and up to ${MAX_ESTIMATE_DAYS}`)
   return value
+}
+
+/** Part of an interface spec; every field is optional. */
+export function specPatch(value: unknown, what: string): Partial<InterfaceSpec> {
+  const s = obj(value, what)
+  const patch: Partial<InterfaceSpec> = {}
+  if (s.kind !== undefined) {
+    if (!interfaceKinds.includes(s.kind as InterfaceSpec['kind']))
+      throw new BadRequest(`${what} kind must be one of ${interfaceKinds.join(', ')}`)
+    patch.kind = s.kind as InterfaceSpec['kind']
+  }
+  if (s.status !== undefined) {
+    if (!specStatuses.includes(s.status as InterfaceSpec['status']))
+      throw new BadRequest(`${what} status must be one of ${specStatuses.join(', ')}`)
+    patch.status = s.status as InterfaceSpec['status']
+  }
+  for (const key of ['endpoint', 'input', 'output', 'notes'] as const) {
+    if (s[key] !== undefined) patch[key] = str(s[key], `${what} ${key}`, SPEC_TEXT_MAX)
+  }
+  return patch
+}
+
+/** A whole interface spec, as the app stores it. */
+function spec(value: unknown): InterfaceSpec | null {
+  if (value === null) return null
+  const p = specPatch(value, 'spec')
+  if (!p.kind || !p.status || p.endpoint === undefined || p.input === undefined || p.output === undefined || p.notes === undefined)
+    throw new BadRequest('spec needs kind, status, endpoint, input, output and notes')
+  return { kind: p.kind, endpoint: p.endpoint, input: p.input, output: p.output, notes: p.notes, status: p.status }
 }
 
 function arr(value: unknown, what: string, max = 1000): unknown[] {
@@ -127,6 +157,8 @@ export function cardRow(value: unknown, boardId: string): CardRow {
       if (typeof i.done !== 'boolean') throw new BadRequest('checklist done must be true or false')
       return { id: id(i.id, 'checklist id'), text: str(i.text, 'checklist text', 1000), done: i.done }
     }),
+    // Apps from before interface specs existed leave it out; the database then keeps what it has.
+    ...(c.spec === undefined ? {} : { spec: spec(c.spec) }),
     // Apps from before progress existed leave both out; the database then keeps what it has.
     ...(c.progress === undefined
       ? {}
@@ -220,6 +252,8 @@ export interface CardInput {
   progress?: number | null
   /** Team member ids or names; unknown names join the board's team. Replaces the assignees. */
   assignees?: string[]
+  /** Fields of the card's interface spec to change (the card gets one if it has none), or null to remove it. */
+  spec?: Partial<InterfaceSpec> | null
 }
 
 export interface TeamMemberInput {
@@ -244,6 +278,8 @@ export interface CardQuery {
   dueTo?: string
   /** Team member id or name, or "none" for cards nobody is assigned to. */
   assignee?: string
+  /** Only cards that are interfaces to implement (they have a spec). */
+  interfaces?: boolean
   limit: number
 }
 
@@ -337,6 +373,7 @@ export function cardInput(value: unknown, isNew: boolean): CardInput {
     ),
     progress: optional(c.progress, (v) => percent(v, 'progress')),
     assignees: optional(c.assignees, (v) => arr(v, 'assignees', 200).map((a) => title(a, 'assignee', 100))),
+    spec: optional(c.spec, (v) => (v === null ? null : specPatch(v, 'spec'))),
   }
 }
 
@@ -374,6 +411,11 @@ export function cardQuery(value: unknown): CardQuery {
     dueFrom: optional(q.dueFrom, (v) => (v === '' ? undefined : date(v, 'dueFrom'))),
     dueTo: optional(q.dueTo, (v) => (v === '' ? undefined : date(v, 'dueTo'))),
     assignee: optional(q.assignee, (v) => text(v, 'assignee')),
+    interfaces: optional(q.interfaces, (v) => {
+      if (v === true || v === 'true') return true
+      if (v === false || v === 'false' || v === '') return undefined
+      throw new BadRequest('interfaces must be true or false')
+    }),
     limit: Math.min(Math.max(limit ?? 100, 1), 500),
   }
 }

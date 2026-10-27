@@ -4,7 +4,8 @@
 // Positions are renumbered here, so callers only say where things go.
 import { randomUUID } from 'node:crypto'
 import type { CardRow } from '../../src/cloud/doc.ts'
-import type { TeamMember } from '../../src/types.ts'
+import type { InterfaceSpec, TeamMember } from '../../src/types.ts'
+import { applySpecPatch } from '../../src/lib/interfaces.ts'
 import { isDoneColumn } from '../../src/lib/done.ts'
 import { todayISO } from '../../src/lib/dates.ts'
 import { dueFromEstimate, needsDateRange, scheduleProblem, startWorkPatch } from '../../src/lib/schedule.ts'
@@ -51,6 +52,8 @@ export interface ApiCard {
   progress: number | null
   /** Progress updates, oldest first. */
   progressLog: { id: string; text: string; progress: number | null; at: string }[]
+  /** The technical spec when the card is an interface to implement, or null. */
+  spec: InterfaceSpec | null
   createdAt: string
   updatedAt: string
 }
@@ -179,6 +182,7 @@ function toApiCard(
     checklist: row.checklist,
     progress: row.progress ?? null,
     progressLog: (row.progress_log ?? []).map((e) => ({ ...e, at: iso(e.at) })),
+    spec: row.spec ?? null,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   }
@@ -540,8 +544,8 @@ export async function createCard(
     const now = Date.now()
     await tx.query(
       `insert into kanban.cards (id, board_id, column_id, position, title, description, label_ids, priority, due_date,
-         checklist, created_at, updated_at, progress, assignee_ids, start_date, estimate_days)
-       values ($1, $2, $3, 0, $4, $5, $6, $7, $8, $9, $10, $10, $11, $12, $13, $14)`,
+         checklist, created_at, updated_at, progress, assignee_ids, start_date, estimate_days, spec)
+       values ($1, $2, $3, 0, $4, $5, $6, $7, $8, $9, $10, $10, $11, $12, $13, $14, $15)`,
       [
         id,
         boardId,
@@ -557,6 +561,7 @@ export async function createCard(
         JSON.stringify(assigneeIds),
         dates.startDate,
         dates.estimateDays,
+        specJson(applySpecPatch(null, input.spec)),
       ],
     )
     await placeCard(tx, boardId, id, column.id, input.position)
@@ -564,6 +569,8 @@ export async function createCard(
   })
   return cardOf(db, boardId, id)
 }
+
+const specJson = (spec: InterfaceSpec | null) => (spec ? JSON.stringify(spec) : null)
 
 export async function updateCard(
   db: Db,
@@ -594,7 +601,8 @@ export async function updateCard(
     )
     await tx.query(
       `update kanban.cards set title = $2, description = $3, priority = $4, due_date = $5, label_ids = $6,
-         checklist = $7, updated_at = $8, progress = $9, assignee_ids = $10, start_date = $11, estimate_days = $12
+         checklist = $7, updated_at = $8, progress = $9, assignee_ids = $10, start_date = $11, estimate_days = $12,
+         spec = $13
        where id = $1`,
       [
         cardId,
@@ -609,6 +617,7 @@ export async function updateCard(
         JSON.stringify(assigneeIds ?? []),
         startDate,
         estimateDays,
+        specJson(applySpecPatch(card.spec ?? null, input.spec)),
       ],
     )
     if (input.column !== undefined || input.position !== undefined) {
@@ -792,12 +801,13 @@ export async function findCards(db: Db, user: User, query: CardQuery): Promise<A
     where.push(`exists (select 1 from jsonb_array_elements(b.team) m
       where (m->>'id' = ${p} or lower(m->>'name') = lower(${p})) and c.assignee_ids @> jsonb_build_array(m->>'id'))`)
   }
+  if (query.interfaces) where.push(`c.spec is not null`)
   if (query.priority) where.push(`c.priority = ${param(query.priority)}`)
   if (query.dueFrom) where.push(`c.due_date >= ${param(query.dueFrom)}`)
   if (query.dueTo) where.push(`c.due_date <= ${param(query.dueTo)}`)
   if (query.search) {
     const p = param(`%${query.search.replace(/[\\%_]/g, (m) => `\\${m}`)}%`)
-    where.push(`(c.title ilike ${p} or c.description ilike ${p} or c.checklist::text ilike ${p} or c.progress_log::text ilike ${p})`)
+    where.push(`(c.title ilike ${p} or c.description ilike ${p} or c.checklist::text ilike ${p} or c.progress_log::text ilike ${p} or coalesce(c.spec::text, '') ilike ${p})`)
   }
   const { rows } = await db.query<CardDbRow & { column_title: string; labels: ApiLabel[]; team: TeamMember[] }>(
     `select c.*, col.title as column_title, b.labels, b.team

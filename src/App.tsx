@@ -17,6 +17,7 @@ import { ContactsDialog } from './components/Contacts'
 import { CredentialsDialog } from './components/Credentials'
 import { InvitesDialog, ShareDialog } from './components/Sharing'
 import { TeamDialog } from './components/Team'
+import { InterfacesDialog } from './components/Interfaces'
 import { AssignmentNotice, AssignmentsDialog } from './components/Assignments'
 import { roleName } from './cloud/api'
 import { useCloud } from './cloud/context'
@@ -34,6 +35,7 @@ export default function App() {
     | 'new-board'
     | 'labels'
     | 'team'
+    | 'interfaces'
     | 'shortcuts'
     | 'share'
     | 'invites'
@@ -88,6 +90,8 @@ export default function App() {
         setShowFilters((v) => !v)
       } else if (event.key === 'w' || event.key === 'W') {
         setDialog('team')
+      } else if (event.key === 'i' || event.key === 'I') {
+        setDialog('interfaces')
       } else if (event.key === '?') {
         setDialog('shortcuts')
       }
@@ -148,6 +152,9 @@ export default function App() {
             </div>
             <button className="button" onClick={() => setDialog('team')} title="Team and workload (W)">
               Team
+            </button>
+            <button className="button" onClick={() => setDialog('interfaces')} title="Interfaces and specs (I)">
+              Interfaces
             </button>
             <button
               className={`button ${showFilters || activeFilterCount ? 'active' : ''}`}
@@ -350,6 +357,17 @@ export default function App() {
           }}
         />
       )}
+      {dialog === 'interfaces' && board && (
+        <InterfacesDialog
+          board={board}
+          readOnly={readOnly}
+          onClose={() => setDialog(null)}
+          onOpenCard={(cardId) => {
+            setDialog(null)
+            setOpenCardId(cardId)
+          }}
+        />
+      )}
       {cloud && dialog === 'share' && board && (
         <ShareDialog cloud={cloud} board={board} onClose={() => setDialog(null)} />
       )}
@@ -389,6 +407,8 @@ export default function App() {
             <dd>Show or hide filters</dd>
             <dt>W</dt>
             <dd>Team and workload</dd>
+            <dt>I</dt>
+            <dd>Interfaces and their specs</dd>
             <dt>Enter</dt>
             <dd>Open the focused card</dd>
             <dt>Space</dt>
@@ -418,6 +438,11 @@ function NewBoardDialog({
   const [inAccount, setInAccount] = useState(canUseAccount)
   const templates: { value: BoardTemplate; name: string; detail: string }[] = [
     { value: 'work', name: 'Work', detail: 'Backlog, To do, In progress, Review, Done' },
+    {
+      value: 'project',
+      name: 'Project',
+      detail: 'Interfaces each member builds, with a spec for each: Spec, To implement, In progress, Review, Done',
+    },
     { value: 'personal', name: 'Daily life', detail: 'To do, Doing, Done' },
     { value: 'blank', name: 'Blank', detail: 'No columns' },
   ]

@@ -30,6 +30,26 @@ export interface ProgressEntry {
   at: number
 }
 
+/** What kind of interface a spec describes. */
+export type InterfaceKind = 'api' | 'event' | 'ui' | 'file' | 'database' | 'other'
+
+/** Where a spec stands: being written, out for review, or agreed by both sides. */
+export type SpecStatus = 'draft' | 'review' | 'agreed'
+
+/** The technical spec of an interface someone has to build. */
+export interface InterfaceSpec {
+  kind: InterfaceKind
+  /** Where it lives: e.g. "POST /v1/orders", a topic, a screen or a file path. */
+  endpoint: string
+  /** What goes in: request, parameters, message or file layout. */
+  input: string
+  /** What comes out: response, events emitted, errors. */
+  output: string
+  /** Anything else: auth, limits, error handling, who calls it. */
+  notes: string
+  status: SpecStatus
+}
+
 export interface Card {
   id: string
   title: string
@@ -49,6 +69,8 @@ export interface Card {
   progress: number | null
   /** Progress updates, oldest first. */
   progressLog: ProgressEntry[]
+  /** Set when the card is an interface to implement; holds its technical spec. */
+  spec: InterfaceSpec | null
   createdAt: number
   updatedAt: number
 }
@@ -76,7 +98,7 @@ export interface Board {
 }
 
 export interface AppState {
-  version: 5
+  version: 6
   boardOrder: string[]
   activeBoardId: string | null
   boards: Record<string, Board>
