@@ -50,12 +50,13 @@ describe('interfaces', () => {
     const list = listInterfaces(team, [
       { card: card('Create order', ['m1'], spec({ senderSystem: 'S/4HANA', receiverAdapter: 'odata', endpoint: 'ORDERS05', input: '{ sku }' })), column: 'Spec', done: false },
     ])
-    const md = specsMarkdown('Checkout', list)
+    const md = specsMarkdown('Checkout', list, { 'Create order': ['spec.docx', 'mapping.xlsx'] })
     expect(md).toContain('# Checkout: interface specs')
     expect(md).toContain('## Kim\n\n### Create order')
     expect(md).toContain('- Sender: S/4HANA via IDoc')
     expect(md).toContain('- Receiver: (not set) via OData')
     expect(md).toContain('- Mode: Asynchronous')
+    expect(md).toContain('- Files: spec.docx, mapping.xlsx')
     expect(md).toContain('- iFlow / endpoint: `ORDERS05`')
     expect(md).toContain('**Source message**\n\n{ sku }')
     expect(md).not.toContain('**Target message')

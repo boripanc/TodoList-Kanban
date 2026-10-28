@@ -43,6 +43,18 @@ export interface AssignmentRequest {
   requestedAt: string
 }
 
+/** A file attached to a card, e.g. an interface spec in Word or Excel. */
+export interface Attachment {
+  id: string
+  cardId: string
+  name: string
+  type: string
+  size: number
+  /** Email of who added it, or null when their account is gone. */
+  uploadedBy: string | null
+  uploadedAt: string
+}
+
 /** An API key, for automation tools such as n8n. The key itself is only shown once, on creation. */
 export interface ApiKey {
   id: string
@@ -159,6 +171,14 @@ export interface CloudApi {
   approveAssignment(boardId: string, cardId: string): Promise<void>
   /** Owner only: the request goes away and the card stays as it is. */
   rejectAssignment(boardId: string, cardId: string): Promise<void>
+
+  /** Files on every card of a board, oldest first. */
+  listAttachments(boardId: string): Promise<Attachment[]>
+  /** Editors and owners: attach a file (contents as base64) to a card. */
+  addAttachment(cardId: string, file: { name: string; data: string }): Promise<Attachment>
+  deleteAttachment(attachmentId: string): Promise<void>
+  /** Where the browser downloads a file from. */
+  attachmentUrl(attachmentId: string): string
 
   listApiKeys(): Promise<ApiKey[]>
   /** Returns the new key's details and the secret key, which can't be read again later. */

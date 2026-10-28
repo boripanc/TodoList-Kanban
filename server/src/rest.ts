@@ -75,6 +75,30 @@ export function restApi(db: Db) {
   api.patch('/cards/:cardId', async (c) =>
     c.json(await k.updateCard(db, user(c), c.req.param('cardId'), v.cardInput(await body(c), false))),
   )
+  api.get('/boards/:boardId/attachments', async (c) =>
+    c.json(await k.listAttachments(db, user(c), { boardId: c.req.param('boardId') })),
+  )
+  api.get('/cards/:cardId/attachments', async (c) =>
+    c.json(await k.listAttachments(db, user(c), { cardId: c.req.param('cardId') })),
+  )
+  api.post('/cards/:cardId/attachments', async (c) =>
+    c.json(await k.addAttachment(db, user(c), c.req.param('cardId'), v.attachmentInput(await body(c))), 201),
+  )
+  api.get('/attachments/:attachmentId', async (c) => {
+    const file = await k.getAttachment(db, user(c), v.uuid(c.req.param('attachmentId')))
+    const ascii = file.name.replace(/[^\x20-\x7e]|["\\]/g, '_')
+    return c.body(new Uint8Array(file.data), 200, {
+      'content-type': file.type,
+      'content-length': String(file.size),
+      'content-disposition': `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+      'x-content-type-options': 'nosniff',
+      'cache-control': 'private, no-store',
+    })
+  })
+  api.delete('/attachments/:attachmentId', async (c) => {
+    await k.deleteAttachment(db, user(c), v.uuid(c.req.param('attachmentId')))
+    return c.json({ ok: true })
+  })
   api.post('/cards/:cardId/progress', async (c) =>
     c.json(await k.addProgressNote(db, user(c), c.req.param('cardId'), v.progressNoteInput(await body(c))), 201),
   )

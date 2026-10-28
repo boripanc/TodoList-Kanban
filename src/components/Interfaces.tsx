@@ -20,6 +20,8 @@ import {
 } from '../lib/interfaces'
 import { Avatar } from './Team'
 import { Modal } from './Modal'
+import { AttachmentLink } from './Attachments'
+import { useCloud } from '../cloud/context'
 
 type TextKey = (typeof specFields)[number]['key']
 type Drafts = Record<TextKey, string>
@@ -226,6 +228,7 @@ function downloadMarkdown(name: string, text: string) {
 }
 
 function InterfaceRows({ items, onOpenCard }: { items: InterfaceItem<Card>[]; onOpenCard: (cardId: string) => void }) {
+  const cloud = useCloud()
   return (
     <ul className="interface-list">
       {items.map(({ card, column, done }) => (
@@ -243,6 +246,15 @@ function InterfaceRows({ items, onOpenCard }: { items: InterfaceItem<Card>[]; on
                 </>
               )}
             </small>
+            {cloud?.attachments.some((a) => a.cardId === card.id) && (
+              <div className="interface-files" aria-label={`Files for ${card.title}`}>
+                {cloud.attachments
+                  .filter((a) => a.cardId === card.id)
+                  .map((a) => (
+                    <AttachmentLink key={a.id} file={a} />
+                  ))}
+              </div>
+            )}
           </div>
           <div className="interface-meta">
             <SpecBadge spec={card.spec} />
@@ -267,6 +279,7 @@ export function InterfacesDialog({
   onOpenCard: (cardId: string) => void
 }) {
   const { state, dispatch } = useStore()
+  const cloud = useCloud()
   const [title, setTitle] = useState('')
   const [senderAdapter, setSenderAdapter] = useState<AdapterType>('idoc')
   const [receiverAdapter, setReceiverAdapter] = useState<AdapterType>('http')
@@ -392,7 +405,11 @@ export function InterfacesDialog({
             <button
               type="button"
               className="button"
-              onClick={() => downloadMarkdown(board.title, specsMarkdown(board.title, list))}
+              onClick={() => {
+                const files: Record<string, string[]> = {}
+                for (const a of cloud?.attachments ?? []) (files[a.cardId] ??= []).push(a.name)
+                downloadMarkdown(board.title, specsMarkdown(board.title, list, files))
+              }}
             >
               Download specs (.md)
             </button>

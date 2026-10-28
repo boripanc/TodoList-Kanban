@@ -26,6 +26,8 @@ interface CardViewProps {
   onToggleItem?: (itemId: string) => void
   /** An assignment asked for through MCP is waiting for the board owner. */
   assignmentPending?: boolean
+  /** Names of the files attached to the card. */
+  files?: string[]
 }
 
 const shortDate = (at: number) => new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
@@ -122,6 +124,7 @@ export function CardView({
   onToggleChecklist,
   onToggleItem,
   assignmentPending = false,
+  files = [],
 }: CardViewProps) {
   const cardLabels = labels.filter((label) => card.labelIds.includes(label.id))
   const doneCount = card.checklist.filter((item) => item.done).length
@@ -159,6 +162,7 @@ export function CardView({
         card.checklist.length > 0 ||
         card.description ||
         assignmentPending ||
+        files.length > 0 ||
         assignees.length > 0) && (
         <div className="card-meta">
           {card.spec && <SpecBadge spec={card.spec} />}
@@ -217,6 +221,11 @@ export function CardView({
               ≡
             </span>
           )}
+          {files.length > 0 && (
+            <span className="badge" title={files.join('\n')} aria-label={`${files.length} attached files`}>
+              📎 {files.length}
+            </span>
+          )}
           {assignmentPending && (
             <span className="badge assign-pending" title="An assignment is waiting for the board owner to approve it">
               ⏳ Assignment pending
@@ -245,6 +254,7 @@ export function CardItem({ card, labels, team, onOpen, readOnly = false }: CardI
   const { dispatch } = useStore()
   const cloud = useCloud()
   const assignmentPending = !!cloud?.assignmentRequests.some((r) => r.cardId === card.id)
+  const files = cloud?.attachments.filter((a) => a.cardId === card.id).map((a) => a.name)
   const [progressOpen, setProgressOpen] = useState(() => isExpanded('progress', card.id))
   const [checklistOpen, setChecklistOpen] = useState(() => isExpanded('checklist', card.id))
   const toggle = (part: ExpandablePart, open: boolean, set: (open: boolean) => void) => () => {
@@ -281,6 +291,7 @@ export function CardItem({ card, labels, team, onOpen, readOnly = false }: CardI
         checklistOpen={checklistOpen}
         onToggleChecklist={toggle('checklist', checklistOpen, setChecklistOpen)}
         assignmentPending={assignmentPending}
+        files={files}
         onToggleItem={
           readOnly
             ? undefined

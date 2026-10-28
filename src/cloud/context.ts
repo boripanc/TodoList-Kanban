@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react'
 import type { Action } from '../state/reducer'
-import type { AssignmentRequest, CloudApi, CloudUser, ReceivedInvite } from './api'
+import type { AssignmentRequest, Attachment, CloudApi, CloudUser, ReceivedInvite } from './api'
 
 export interface Cloud {
   api: CloudApi
@@ -29,6 +29,11 @@ export interface Cloud {
   approveAssignment: (cardId: string) => Promise<void>
   /** Owner only: turn the request down; the card stays as it is. */
   rejectAssignment: (cardId: string) => Promise<void>
+  /** Files on the current board's cards, oldest first. */
+  attachments: Attachment[]
+  /** Attach a file to a card on the current board (editors and owners). */
+  addAttachment: (cardId: string, file: File) => Promise<void>
+  deleteAttachment: (attachmentId: string) => Promise<void>
   /** Resolves once changes made so far have reached the server. */
   saved: () => Promise<void>
   /** Reload boards and invitations from the server. */

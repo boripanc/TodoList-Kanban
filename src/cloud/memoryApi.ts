@@ -1,7 +1,9 @@
+import { attachmentProblem, attachmentTypes, extensionOf } from '../lib/attachments'
 import type { Role } from '../types'
 import type {
   ApiKey,
   AssignmentRequest,
+  Attachment,
   CloudApi,
   ConnectedApp,
   CloudUser,
@@ -37,6 +39,8 @@ export class MemoryServer {
   credentials: (Credential & { userId: string; secrets: CredentialSecrets })[] = []
   /** Assignments asked for through MCP, waiting for the board owner. */
   assignmentRequests: (AssignmentRequest & { boardId: string })[] = []
+  /** Attached files, with their contents as base64. */
+  attachments: (Attachment & { boardId: string; data: string })[] = []
   private listeners = new Set<{ userId: string; onBoard: (id: string) => void; onMembership: () => void }>()
   private clock = 0
   private nextId = 1
@@ -193,8 +197,9 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
         server.columns.delete(id)
         for (const [cardId, card] of server.cards) if (card.column_id === id) server.cards.delete(cardId)
       }
-      // Like the server: a deleted card takes its waiting assignment with it.
+      // Like the server: a deleted card takes its waiting assignment and its files with it.
       server.assignmentRequests = server.assignmentRequests.filter((r) => server.cards.has(r.cardId))
+      server.attachments = server.attachments.filter((a) => server.cards.has(a.cardId))
       server.touch(boardId)
     },
     async deleteBoard(boardId) {
@@ -323,6 +328,42 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
       server.assignmentRequests = server.assignmentRequests.filter((r) => !(r.boardId === boardId && r.cardId === cardId))
       if (server.assignmentRequests.length === before) throw new Error('No assignment is waiting for that card')
       server.touch(boardId)
+    },
+
+    async listAttachments(boardId) {
+      if (!server.role(boardId, user?.id)) throw new Error('Board not found')
+      return server.attachments.filter((a) => a.boardId === boardId).map(({ boardId: _b, data: _d, ...a }) => ({ ...a }))
+    },
+    async addAttachment(cardId, file) {
+      const card = server.cards.get(cardId)
+      if (!card || !server.role(card.board_id, user?.id)) throw new Error('Card not found')
+      canEdit(card.board_id)
+      const size = atob(file.data).length
+      const problem = attachmentProblem(file.name, size)
+      if (problem) throw new Error(problem)
+      const attachment: Attachment = {
+        id: server.token(),
+        cardId,
+        name: file.name,
+        type: attachmentTypes[extensionOf(file.name)],
+        size,
+        uploadedBy: me().email,
+        uploadedAt: new Date().toISOString(),
+      }
+      server.attachments.push({ ...attachment, boardId: card.board_id, data: file.data })
+      server.touch(card.board_id)
+      return { ...attachment }
+    },
+    async deleteAttachment(attachmentId) {
+      const found = server.attachments.find((a) => a.id === attachmentId)
+      if (!found || !server.role(found.boardId, user?.id)) throw new Error('Attachment not found')
+      canEdit(found.boardId)
+      server.attachments = server.attachments.filter((a) => a !== found)
+      server.touch(found.boardId)
+    },
+    attachmentUrl(attachmentId) {
+      const found = server.attachments.find((a) => a.id === attachmentId)
+      return found ? `data:${found.type};base64,${found.data}` : ''
     },
 
     async listApiKeys() {

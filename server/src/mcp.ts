@@ -231,6 +231,18 @@ export const tools: Tool[] = [
     run: (db, user, a) => k.getCard(db, user, v.ref(a.cardId, 'cardId')),
   },
   {
+    name: 'list_attachments',
+    title: 'List attached files',
+    description:
+      'List the files attached to a card (or to every card on a board), such as interface specs in Word or Excel: name, size, who added it and when. Download a file with GET on its url using the same credentials; upload with POST /api/v1/cards/{cardId}/attachments.',
+    inputSchema: object({ cardId: text('Card id; give this or boardId.'), boardId: text('Board id, for every file on it.') }),
+    annotations: { readOnlyHint: true },
+    run: (db, user, a) =>
+      a.cardId !== undefined
+        ? k.listAttachments(db, user, { cardId: v.ref(a.cardId, 'cardId') })
+        : k.listAttachments(db, user, { boardId: v.ref(a.boardId, 'boardId') }),
+  },
+  {
     name: 'create_card',
     title: 'Create a card',
     description: 'Add a card to a column, at the bottom unless a position (0 = top) is given.',

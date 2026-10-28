@@ -638,6 +638,62 @@ describe('accounts and sharing', () => {
     expect(await screen.findByRole('option', { name: 'Trip to Japan · can edit' })).toBeInTheDocument()
   })
 
+  it('attaches Word and Excel spec files to a card, downloads and removes them', async () => {
+    const user = userEvent.setup()
+    const { server, ana, boardId } = await serverWithTrip()
+    renderWithCloud(server.client(ana))
+    const trip = await screen.findByRole('option', { name: 'Trip' })
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Current board' }), trip)
+
+    await user.click(await screen.findByText('Pack bags'))
+    let card = screen.getByRole('dialog', { name: 'Edit card: Pack bags' })
+    const word = new File(['spec text'], 'Packing spec.docx', {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    })
+    const sheet = new File(['a,b'], 'mapping.xlsx')
+    await user.upload(within(card).getByLabelText('Choose files to attach'), [word, sheet])
+    const list = await within(card).findByRole('list', { name: 'Attached files' })
+    await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(2))
+    const link = within(list).getByRole('link', { name: /Packing spec\.docx/ })
+    expect(link).toHaveAttribute('download', 'Packing spec.docx')
+    expect(link.getAttribute('href')).toMatch(/^data:application\/vnd\.openxml/)
+    expect(server.attachments.map((a) => [a.boardId, a.name, atob(a.data)])).toEqual([
+      [boardId, 'Packing spec.docx', 'spec text'],
+      [boardId, 'mapping.xlsx', 'a,b'],
+    ])
+
+    // Files that can't be attached are refused with a message.
+    fireEvent.change(within(card).getByLabelText('Choose files to attach'), {
+      target: { files: [new File(['x'], 'tool.exe')] },
+    })
+    expect(await within(card).findByRole('alert')).toHaveTextContent('only Word, Excel')
+
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('button', { name: 'Card: Pack bags' })).toHaveTextContent('📎 2')
+
+    await user.click(screen.getByText('Pack bags'))
+    card = screen.getByRole('dialog', { name: 'Edit card: Pack bags' })
+    window.confirm = () => true
+    await user.click(within(card).getByRole('button', { name: 'Remove mapping.xlsx' }))
+    await waitFor(() => expect(server.attachments.map((a) => a.name)).toEqual(['Packing spec.docx']))
+    expect(await within(card).findByText('Files (1)')).toBeInTheDocument()
+  })
+
+  it('shows files read-only to viewers', async () => {
+    const { server, ana, boardId } = await serverWithTrip()
+    const anaApi = server.client(ana)
+    await anaApi.addAttachment('c1', { name: 'spec.pdf', data: btoa('pdf') })
+    const token = await anaApi.createInviteLink(boardId, 'viewer')
+    window.history.replaceState(null, '', `/?join=${token}`)
+    const user = userEvent.setup()
+    renderWithCloud(server.client(server.addUser('cat@example.com')))
+    await user.click(await screen.findByText('Pack bags'))
+    const card = screen.getByRole('dialog', { name: 'Card: Pack bags' })
+    expect(await within(card).findByRole('link', { name: /spec\.pdf/ })).toBeInTheDocument()
+    expect(within(card).queryByLabelText('Choose files to attach')).not.toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: 'Remove spec.pdf' })).not.toBeInTheDocument()
+  })
+
   it('lets the board owner approve or reject assignments asked for through MCP', async () => {
     const user = userEvent.setup()
     const { server, ana, boardId } = await serverWithTrip()

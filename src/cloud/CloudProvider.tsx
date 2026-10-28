@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useStore } from '../state/context'
-import type { AssignmentRequest, CloudApi, CloudUser, ReceivedInvite } from './api'
+import type { AssignmentRequest, Attachment, CloudApi, CloudUser, ReceivedInvite } from './api'
+import { attachmentProblem } from '../lib/attachments'
 import { CloudContext, type Cloud } from './context'
 import { CloudSync } from './sync'
 import { SignInPage } from '../components/Sharing'
@@ -77,6 +78,16 @@ export function CloudProvider({ api, children }: { api: CloudApi | null; childre
   return <CloudSession api={api}>{children}</CloudSession>
 }
 
+/** A file's contents as base64. */
+function readBase64(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''))
+    reader.onerror = () => reject(new Error('Could not read that file.'))
+    reader.readAsDataURL(file)
+  })
+}
+
 function CloudSession({ api, children }: { api: CloudApi; children: ReactNode }) {
   const { state, dispatch, getState } = useStore()
   const [user, setUser] = useState<CloudUser | null | undefined>(undefined)
@@ -85,6 +96,7 @@ function CloudSession({ api, children }: { api: CloudApi; children: ReactNode })
   const [joinToken, setJoinToken] = useState<string | null>(readPendingJoin)
   const syncRef = useRef<CloudSync | null>(null)
   const [requests, setRequests] = useState<{ boardId: string; list: AssignmentRequest[] } | null>(null)
+  const [files, setFiles] = useState<{ boardId: string; list: Attachment[] } | null>(null)
 
   // The board on screen (like App picks it), if it is in the account.
   const shownId =
@@ -122,12 +134,15 @@ function CloudSession({ api, children }: { api: CloudApi; children: ReactNode })
     }
   }, [api])
 
-  /** Reload the assignments waiting on a board, if that board is still the one on screen. */
+  /** Reload the assignments waiting on a board and its attached files, if that board is still the one on screen. */
   const refreshRequests = useCallback(
     async (boardId: string) => {
       try {
-        const list = await api.listAssignmentRequests(boardId)
-        if (cloudBoardRef.current === boardId) setRequests({ boardId, list })
+        const [list, attached] = await Promise.all([api.listAssignmentRequests(boardId), api.listAttachments(boardId)])
+        if (cloudBoardRef.current === boardId) {
+          setRequests({ boardId, list })
+          setFiles({ boardId, list: attached })
+        }
       } catch (e) {
         console.error(e)
       }
@@ -276,6 +291,20 @@ function CloudSession({ api, children }: { api: CloudApi; children: ReactNode })
         await api.rejectAssignment(cloudBoardId, cardId)
         await refreshRequests(cloudBoardId)
       },
+      attachments: user && files && files.boardId === cloudBoardId ? files.list : [],
+      addAttachment: async (cardId, file) => {
+        if (!cloudBoardId) return
+        const problem = attachmentProblem(file.name, file.size)
+        if (problem) throw new Error(problem)
+        await saved() // The card must reach the server before a file can join it.
+        await api.addAttachment(cardId, { name: file.name, data: await readBase64(file) })
+        await refreshRequests(cloudBoardId)
+      },
+      deleteAttachment: async (attachmentId) => {
+        if (!cloudBoardId) return
+        await api.deleteAttachment(attachmentId)
+        await refreshRequests(cloudBoardId)
+      },
       saved,
       refresh,
     }),
@@ -291,6 +320,7 @@ function CloudSession({ api, children }: { api: CloudApi; children: ReactNode })
       refresh,
       refreshInvites,
       requests,
+      files,
       cloudBoardId,
       refreshRequests,
     ],

@@ -4,6 +4,7 @@ import { adapterTypes, messageModes, SPEC_TEXT_MAX, specFields, specStatuses } f
 import type { ContactInput, CredentialField, CredentialInput } from '../../src/cloud/api.ts'
 import { credentialKinds, type CredentialKind } from '../../src/lib/credentials.ts'
 import { MAX_ESTIMATE_DAYS } from '../../src/lib/schedule.ts'
+import { attachmentProblem, attachmentTypes, extensionOf } from '../../src/lib/attachments.ts'
 
 /** Thrown for a request body that doesn't have the expected shape; becomes a 400. */
 export class BadRequest extends Error {}
@@ -528,4 +529,24 @@ export function credentialInput(value: unknown, isNew: boolean): CredentialInput
     notes = null
   } else notes = plain(c.notes, 'notes', MAX_SECRET)
   return { name: title(c.name, 'name', 200), kind, url: plain(c.url, 'url', 2000), notes, fields }
+}
+
+export interface AttachmentInput {
+  name: string
+  /** Media type, worked out from the file name (never taken from the caller). */
+  type: string
+  data: Buffer
+}
+
+/** A file to attach: `{name, data}` with the contents as base64. */
+export function attachmentInput(value: unknown): AttachmentInput {
+  const a = obj(value, 'attachment')
+  // No folders or control characters in a file name.
+  const name = [...title(a.name, 'name', 255)].map((ch) => (ch < ' ' || ch === '/' || ch === '\\' ? '_' : ch)).join('')
+  if (typeof a.data !== 'string' || !/^[A-Za-z0-9+/\r\n]*={0,2}\s*$/.test(a.data))
+    throw new BadRequest('data must be the file contents as base64')
+  const data = Buffer.from(a.data, 'base64')
+  const problem = attachmentProblem(name, data.length)
+  if (problem) throw new BadRequest(problem)
+  return { name, type: attachmentTypes[extensionOf(name)], data }
 }
