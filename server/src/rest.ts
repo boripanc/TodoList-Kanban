@@ -95,6 +95,10 @@ export function restApi(db: Db) {
       'cache-control': 'private, no-store',
     })
   })
+  api.patch('/attachments/:attachmentId', async (c) => {
+    const id = v.uuid(c.req.param('attachmentId'))
+    return c.json(await k.setAttachmentCategory(db, user(c), id, v.attachmentUpdate(await body(c))))
+  })
   api.delete('/attachments/:attachmentId', async (c) => {
     await k.deleteAttachment(db, user(c), v.uuid(c.req.param('attachmentId')))
     return c.json({ ok: true })

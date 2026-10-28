@@ -292,12 +292,17 @@ function CloudSession({ api, children }: { api: CloudApi; children: ReactNode })
         await refreshRequests(cloudBoardId)
       },
       attachments: user && files && files.boardId === cloudBoardId ? files.list : [],
-      addAttachment: async (cardId, file) => {
+      addAttachment: async (cardId, file, category) => {
         if (!cloudBoardId) return
         const problem = attachmentProblem(file.name, file.size)
         if (problem) throw new Error(problem)
         await saved() // The card must reach the server before a file can join it.
-        await api.addAttachment(cardId, { name: file.name, data: await readBase64(file) })
+        await api.addAttachment(cardId, { name: file.name, data: await readBase64(file), category })
+        await refreshRequests(cloudBoardId)
+      },
+      setAttachmentCategory: async (attachmentId, category) => {
+        if (!cloudBoardId) return
+        await api.setAttachmentCategory(attachmentId, category)
         await refreshRequests(cloudBoardId)
       },
       deleteAttachment: async (attachmentId) => {

@@ -21,7 +21,13 @@ import {
 import { Avatar } from './Team'
 import { Modal } from './Modal'
 import { AttachmentLink } from './Attachments'
+import type { Attachment } from '../cloud/api'
+import { attachmentCategories, categoryName } from '../lib/attachments'
 import { useCloud } from '../cloud/context'
+
+/** Technical spec first, then mapping spec, then other files. */
+const sortedFiles = (files: Attachment[]) =>
+  [...files].sort((a, b) => attachmentCategories.indexOf(a.category) - attachmentCategories.indexOf(b.category))
 
 type TextKey = (typeof specFields)[number]['key']
 type Drafts = Record<TextKey, string>
@@ -174,7 +180,7 @@ function SpecFields({
           />
         </fieldset>
       </div>
-      {(['endpoint', 'input', 'output', 'notes'] as const).map((key) => (
+      {(['endpoint', 'notes'] as const).map((key) => (
         <label key={key} className="field">
           <span>{field(key).name}</span>
           {text(key, field(key).hint, key !== 'endpoint')}
@@ -248,11 +254,12 @@ function InterfaceRows({ items, onOpenCard }: { items: InterfaceItem<Card>[]; on
             </small>
             {cloud?.attachments.some((a) => a.cardId === card.id) && (
               <div className="interface-files" aria-label={`Files for ${card.title}`}>
-                {cloud.attachments
-                  .filter((a) => a.cardId === card.id)
-                  .map((a) => (
-                    <AttachmentLink key={a.id} file={a} />
-                  ))}
+                {sortedFiles(cloud.attachments.filter((a) => a.cardId === card.id)).map((a) => (
+                  <span key={a.id} className="interface-file">
+                    {a.category !== 'other' && <small className="muted">{categoryName[a.category]}:</small>}
+                    <AttachmentLink file={a} />
+                  </span>
+                ))}
               </div>
             )}
           </div>
@@ -407,7 +414,8 @@ export function InterfacesDialog({
               className="button"
               onClick={() => {
                 const files: Record<string, string[]> = {}
-                for (const a of cloud?.attachments ?? []) (files[a.cardId] ??= []).push(a.name)
+                for (const a of sortedFiles(cloud?.attachments ?? []))
+                  (files[a.cardId] ??= []).push(a.category === 'other' ? a.name : `${a.name} (${categoryName[a.category]})`)
                 downloadMarkdown(board.title, specsMarkdown(board.title, list, files))
               }}
             >

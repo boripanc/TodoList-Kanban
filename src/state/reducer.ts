@@ -64,7 +64,7 @@ export type Action =
   | { type: 'cloud/clear' }
 
 export const initialState: AppState = {
-  version: 6,
+  version: 7,
   boardOrder: [],
   activeBoardId: null,
   boards: {},

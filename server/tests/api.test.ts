@@ -2,6 +2,7 @@
 // Exercises the server API against an in-process Postgres (PGlite): accounts,
 // sharing, roles, invites and live-update notifications.
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { PGlite } from '@electric-sql/pglite'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from '../src/app.ts'
@@ -155,6 +156,49 @@ describe('accounts', () => {
   })
 })
 
+describe('migrations', () => {
+  it('moves old source and target message text into the spec notes', async () => {
+    const ana = await ownerWithBoard()
+    const base = {
+      senderSystem: 'S/4HANA',
+      senderAdapter: 'idoc',
+      receiverSystem: '',
+      receiverAdapter: 'http',
+      mode: 'async',
+      endpoint: '',
+      status: 'draft',
+    }
+    await ana.call('POST', '/boards/b1/changes', {
+      upsertCards: [
+        { ...card('c1', 'Both', 'col1', 0), spec: { ...base, notes: 'OAuth' } },
+        { ...card('c2', 'Only output', 'col1', 1), spec: { ...base, notes: '' } },
+        { ...card('c3', 'Plain', 'col1', 2), spec: null },
+      ],
+    })
+    // As saved before migration 013.
+    await db.query(
+      `update kanban.cards set spec = spec || $2::jsonb where id = $1`,
+      ['c1', JSON.stringify({ input: 'IDoc ORDERS05', output: 'Map to SalesOrder' })],
+    )
+    await db.query(`update kanban.cards set spec = spec || $2::jsonb where id = $1`, [
+      'c2',
+      JSON.stringify({ input: ' ', output: 'MATNR -> sku' }),
+    ])
+    const sql = readFileSync(new URL('../migrations/013_spec_files.sql', import.meta.url), 'utf8')
+    await db.query(sql.match(/update kanban\.cards[\s\S]*?;/)![0])
+
+    const { rows } = await db.query<{ id: string; spec: Record<string, string> | null }>(
+      'select id, spec from kanban.cards order by id',
+    )
+    expect(rows[0].spec).not.toHaveProperty('input')
+    expect(rows[0].spec).not.toHaveProperty('output')
+    expect(rows[0].spec?.notes).toBe('OAuth\n\nSource message:\nIDoc ORDERS05\n\nTarget message and mapping:\nMap to SalesOrder')
+    expect(rows[1].spec?.notes).toBe('Target message and mapping:\nMATNR -> sku')
+    expect(rows[1].spec?.senderSystem).toBe('S/4HANA')
+    expect(rows[2].spec).toBeNull()
+  })
+})
+
 describe('boards', () => {
   it('creates a board, reads it back and applies changes', async () => {
     const ana = await ownerWithBoard()
@@ -274,8 +318,6 @@ describe('boards', () => {
       receiverAdapter: 'http',
       mode: 'async',
       endpoint: 'ORDERS05',
-      input: '{ sku }',
-      output: '201 { id }',
       notes: '',
       status: 'draft',
     }
@@ -749,6 +791,7 @@ describe('REST API (v1)', () => {
     const created = await n8n.call('POST', '/v1/boards/b1/cards', {
       column: 'To do',
       title: 'Orders API',
+      // Fields that no longer exist (source and target message) are ignored.
       spec: { senderSystem: 'S/4HANA', endpoint: 'POST /v1/orders', input: '{ sku, qty }' },
     })
     expect(created.status).toBe(201)
@@ -760,21 +803,19 @@ describe('REST API (v1)', () => {
       receiverAdapter: 'http',
       mode: 'async',
       endpoint: 'POST /v1/orders',
-      input: '{ sku, qty }',
-      output: '',
       notes: '',
       status: 'draft',
     })
     const id = created.data.id
     // Only the fields given change.
-    const agreed = await n8n.call('PATCH', `/v1/cards/${id}`, { spec: { output: '201 { id }', status: 'agreed' } })
-    expect(agreed.data.spec).toMatchObject({ endpoint: 'POST /v1/orders', output: '201 { id }', status: 'agreed' })
+    const agreed = await n8n.call('PATCH', `/v1/cards/${id}`, { spec: { notes: 'OAuth', status: 'agreed' } })
+    expect(agreed.data.spec).toMatchObject({ endpoint: 'POST /v1/orders', notes: 'OAuth', status: 'agreed' })
     expect((await n8n.call('PATCH', `/v1/cards/${id}`, { title: 'Orders API v1' })).data.spec.status).toBe('agreed')
 
     expect((await n8n.call('GET', '/v1/cards/c1')).data.spec).toBeNull()
     const interfaces = await n8n.call('GET', '/v1/boards/b1/cards?interfaces=true')
     expect(interfaces.data.map((c: { id: string }) => c.id)).toEqual([id])
-    expect((await n8n.call('GET', '/v1/cards?search=qty')).data.map((c: { id: string }) => c.id)).toEqual([id])
+    expect((await n8n.call('GET', '/v1/cards?search=OAuth')).data.map((c: { id: string }) => c.id)).toEqual([id])
 
     expect((await n8n.call('PATCH', `/v1/cards/${id}`, { spec: { receiverAdapter: 'grpc' } })).status).toBe(400)
     expect((await n8n.call('PATCH', `/v1/cards/${id}`, { spec: { status: 'done' } })).status).toBe(400)
@@ -802,6 +843,7 @@ describe('REST API (v1)', () => {
       name: 'Orders spec.docx',
       type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       size: contents.length,
+      category: 'other',
       uploadedBy: 'ana@example.com',
     })
     const n8n = await apiKeyFor(ana)
@@ -834,6 +876,7 @@ describe('REST API (v1)', () => {
     const big = Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64')
     expect((await bad({ name: 'big.xlsx', data: big })).data.error).toMatch(/larger than 10 MB/)
     expect((await n8n.call('POST', '/v1/cards/nope/attachments', file)).status).toBe(404)
+    expect((await bad({ ...file, category: 'design' })).data.error).toMatch(/category must be one of/)
 
     // Viewers read and download; they can't add or remove. Strangers see nothing.
     const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
@@ -851,6 +894,35 @@ describe('REST API (v1)', () => {
     // Deleting the card deletes its files.
     await n8n.call('DELETE', '/v1/cards/c1')
     expect((await db.query('select id from kanban.attachments')).rows).toEqual([])
+  })
+
+  it('files spec documents as technical, mapping or other, and moves them by role', async () => {
+    const ana = await ownerWithBoard()
+    const data = Buffer.from('x').toString('base64')
+    const tech = await ana.call('POST', '/v1/cards/c1/attachments', { name: 'iflow.docx', data, category: 'technical' })
+    expect(tech.data.category).toBe('technical')
+    const map = await ana.call('POST', '/v1/cards/c1/attachments', { name: 'fields.xlsx', data, category: 'mapping' })
+    expect((await ana.call('GET', '/v1/cards/c1/attachments')).data.map((a: { category: string }) => a.category)).toEqual([
+      'technical',
+      'mapping',
+    ])
+
+    const editor = await apiKeyFor(await share(ana, 'cat@example.com', 'editor'))
+    const moved = await editor.call('PATCH', `/v1/attachments/${map.data.id}`, { category: 'other' })
+    expect(moved.status).toBe(200)
+    expect(moved.data).toMatchObject({ id: map.data.id, name: 'fields.xlsx', category: 'other' })
+    expect((await editor.call('PATCH', `/v1/attachments/${map.data.id}`, { category: 'x' })).status).toBe(400)
+    expect((await editor.call('PATCH', `/v1/attachments/${map.data.id}`, {})).status).toBe(400)
+    expect((await editor.call('PATCH', '/v1/attachments/not-a-uuid', { category: 'other' })).status).toBe(400)
+
+    const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
+    expect((await viewer.call('PATCH', `/v1/attachments/${tech.data.id}`, { category: 'other' })).status).toBe(403)
+    const stranger = await apiKeyFor(await signUp('eve@example.com'))
+    expect((await stranger.call('PATCH', `/v1/attachments/${tech.data.id}`, { category: 'other' })).status).toBe(404)
+    expect((await db.query('select category from kanban.attachments order by uploaded_at')).rows).toEqual([
+      { category: 'technical' },
+      { category: 'other' },
+    ])
   })
 
   it('gives API keys their owner’s role on each board', async () => {

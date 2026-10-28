@@ -95,8 +95,6 @@ const spec = {
       receiverAdapter: adapter('receiver'),
       mode: { type: 'string', enum: messageModes, description: 'async (fire and forget) or sync (request and reply).' },
       endpoint: text('iFlow name or address, e.g. "/orders/create", an IDoc type or a folder.'),
-      input: text('Source message: structure or sample, IDoc type, file layout (Markdown is fine).'),
-      output: text('Target message and mapping rules, response or acknowledgement (Markdown is fine).'),
       notes: text('Anything else: auth, error handling, retries, volume, schedule.'),
       status: { type: 'string', enum: specStatuses, description: 'draft, review (out for review) or agreed.' },
     }),
@@ -234,7 +232,7 @@ export const tools: Tool[] = [
     name: 'list_attachments',
     title: 'List attached files',
     description:
-      'List the files attached to a card (or to every card on a board), such as interface specs in Word or Excel: name, size, who added it and when. Download a file with GET on its url using the same credentials; upload with POST /api/v1/cards/{cardId}/attachments.',
+      'List the files attached to a card (or to every card on a board), such as interface specs in Word or Excel: name, size, category (technical spec, mapping spec or other), who added it and when. Download a file with GET on its url using the same credentials; upload with POST /api/v1/cards/{cardId}/attachments (with an optional category).',
     inputSchema: object({ cardId: text('Card id; give this or boardId.'), boardId: text('Board id, for every file on it.') }),
     annotations: { readOnlyHint: true },
     run: (db, user, a) =>

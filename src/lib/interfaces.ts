@@ -62,15 +62,13 @@ export const statusName: Record<SpecStatus, string> = {
   agreed: 'Agreed',
 }
 
-type TextKey = 'senderSystem' | 'receiverSystem' | 'endpoint' | 'input' | 'output' | 'notes'
+type TextKey = 'senderSystem' | 'receiverSystem' | 'endpoint' | 'notes'
 
 /** What each text field of a spec holds, with a hint shown while it is empty. */
 export const specFields: { key: TextKey; name: string; hint: string }[] = [
   { key: 'senderSystem', name: 'Sender system', hint: 'e.g. S/4HANA PRD' },
   { key: 'receiverSystem', name: 'Receiver system', hint: 'e.g. Salesforce' },
   { key: 'endpoint', name: 'iFlow / endpoint', hint: 'iFlow name, address (/orders/create), IDoc type or folder' },
-  { key: 'input', name: 'Source message', hint: 'Structure or sample, IDoc type, file layout' },
-  { key: 'output', name: 'Target message and mapping', hint: 'Target structure, mapping rules, response or ack' },
   { key: 'notes', name: 'Notes', hint: 'Auth, error handling, retries, volume, schedule' },
 ]
 
@@ -85,11 +83,23 @@ export function emptySpec(senderAdapter: AdapterType = 'idoc', receiverAdapter: 
     receiverAdapter,
     mode: 'async',
     endpoint: '',
-    input: '',
-    output: '',
     notes: '',
     status: 'draft',
   }
+}
+
+/**
+ * Specs saved before version 7 had a source message and a target message
+ * field. Those are gone (the technical and mapping spec files hold that now),
+ * so any text in them moves to the end of the notes rather than being lost.
+ */
+export function withoutMessageFields(spec: InterfaceSpec & { input?: unknown; output?: unknown }): InterfaceSpec {
+  const { input, output, ...rest } = spec
+  const parts = [rest.notes.trim()]
+  if (typeof input === 'string' && input.trim()) parts.push(`Source message:\n${input.trim()}`)
+  if (typeof output === 'string' && output.trim()) parts.push(`Target message and mapping:\n${output.trim()}`)
+  const notes = parts.filter(Boolean).join('\n\n')
+  return { ...rest, notes: notes === rest.notes.trim() ? rest.notes : notes }
 }
 
 /** "S/4HANA (IDoc) → Salesforce (HTTP / REST)", leaving out systems not named yet. */
@@ -194,10 +204,7 @@ export function specsMarkdown<C extends SpecCard>(
       if (spec.endpoint.trim()) out.push(`- iFlow / endpoint: \`${spec.endpoint.trim()}\``)
       if (files[card.id]?.length) out.push(`- Files: ${files[card.id].join(', ')}`)
       out.push('')
-      for (const field of specFields.slice(3)) {
-        const text = spec[field.key].trim()
-        if (text) out.push(`**${field.name}**`, '', text, '')
-      }
+      if (spec.notes.trim()) out.push('**Notes**', '', spec.notes.trim(), '')
     }
   }
   for (const m of list.members) section(m.member.name, m.items)

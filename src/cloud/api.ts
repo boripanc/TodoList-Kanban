@@ -1,3 +1,4 @@
+import type { AttachmentCategory } from '../lib/attachments'
 import type { Role } from '../types'
 import type { CredentialKind } from '../lib/credentials'
 import type { BoardDoc, BoardOps, BoardSummary } from './doc'
@@ -50,6 +51,8 @@ export interface Attachment {
   name: string
   type: string
   size: number
+  /** Which part of the interface spec it is. */
+  category: AttachmentCategory
   /** Email of who added it, or null when their account is gone. */
   uploadedBy: string | null
   uploadedAt: string
@@ -175,10 +178,14 @@ export interface CloudApi {
   /** Files on every card of a board, oldest first. */
   listAttachments(boardId: string): Promise<Attachment[]>
   /** Editors and owners: attach a file (contents as base64) to a card. */
-  addAttachment(cardId: string, file: { name: string; data: string }): Promise<Attachment>
+  addAttachment(cardId: string, file: { name: string; data: string; category?: AttachmentCategory }): Promise<Attachment>
+  /** Editors and owners: move a file to another part of the spec. */
+  setAttachmentCategory(attachmentId: string, category: AttachmentCategory): Promise<Attachment>
   deleteAttachment(attachmentId: string): Promise<void>
   /** Where the browser downloads a file from. */
   attachmentUrl(attachmentId: string): string
+  /** A file's contents, for showing it in the app. */
+  fetchAttachment(attachmentId: string): Promise<Blob>
 
   listApiKeys(): Promise<ApiKey[]>
   /** Returns the new key's details and the secret key, which can't be read again later. */

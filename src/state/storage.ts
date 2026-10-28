@@ -1,6 +1,7 @@
 import type { AppState } from '../types'
 import { createId } from '../lib/id'
 import { todayISO } from '../lib/dates'
+import { withoutMessageFields } from '../lib/interfaces'
 import { initialState, reducer, type Action } from './reducer'
 import { templateColumns, templateLabels, type BoardTemplate } from './templates'
 
@@ -11,7 +12,7 @@ export function isAppState(value: unknown): value is AppState {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
   return (
-    (v.version === 1 || v.version === 2 || v.version === 3 || v.version === 4 || v.version === 5 || v.version === 6) &&
+    (v.version === 1 || v.version === 2 || v.version === 3 || v.version === 4 || v.version === 5 || v.version === 6 || v.version === 7) &&
     Array.isArray(v.boardOrder) &&
     typeof v.boards === 'object' &&
     v.boards !== null &&
@@ -26,7 +27,8 @@ export function isAppState(value: unknown): value is AppState {
  * Bring saved state up to the current version. Version 1 cards had no
  * progress; boards before version 3 had no team and cards no assignees;
  * cards before version 4 had no start date, and before version 5 no estimate,
- * and before version 6 no interface spec.
+ * and before version 6 no interface spec. Specs before version 7 had source
+ * and target message fields, whose text now lives in the notes.
  */
 export function migrateState(state: AppState): AppState {
   const cards: AppState['cards'] = {}
@@ -38,12 +40,12 @@ export function migrateState(state: AppState): AppState {
       estimateDays: card.estimateDays ?? null,
       progress: card.progress ?? null,
       progressLog: card.progressLog ?? [],
-      spec: card.spec ?? null,
+      spec: card.spec ? withoutMessageFields(card.spec) : null,
     }
   }
   const boards: AppState['boards'] = {}
   for (const [id, board] of Object.entries(state.boards)) boards[id] = { ...board, team: board.team ?? [] }
-  return { ...state, version: 6, boards, cards }
+  return { ...state, version: 7, boards, cards }
 }
 
 export function loadState(storage: Storage | undefined = globalThis.localStorage): AppState {

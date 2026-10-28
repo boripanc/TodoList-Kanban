@@ -272,8 +272,6 @@ describe('interfaces', () => {
         receiverAdapter: 'http',
         mode: 'async',
         endpoint: '',
-        input: '',
-        output: '',
         notes: '',
         status: 'draft',
       },
@@ -293,8 +291,8 @@ describe('interfaces', () => {
     expect(state.cards.c1.spec).toBeNull()
     state = run(state, { type: 'card/updateSpec', cardId: 'c1', patch: { endpoint: 'POST /orders' }, now: now + 1 })
     expect(state.cards.c1).toMatchObject({ spec: { senderAdapter: 'idoc', endpoint: 'POST /orders', status: 'draft' }, updatedAt: now + 1 })
-    state = run(state, { type: 'card/updateSpec', cardId: 'c1', patch: { status: 'agreed', output: '201' }, now })
-    expect(state.cards.c1.spec).toMatchObject({ endpoint: 'POST /orders', output: '201', status: 'agreed' })
+    state = run(state, { type: 'card/updateSpec', cardId: 'c1', patch: { status: 'agreed', notes: '201' }, now })
+    expect(state.cards.c1.spec).toMatchObject({ endpoint: 'POST /orders', notes: '201', status: 'agreed' })
 
     // A copy gets its own spec.
     state = run(state, { type: 'card/duplicate', cardId: 'c1', newId: 'c2', now })

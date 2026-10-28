@@ -4,7 +4,13 @@ import { adapterTypes, messageModes, SPEC_TEXT_MAX, specFields, specStatuses } f
 import type { ContactInput, CredentialField, CredentialInput } from '../../src/cloud/api.ts'
 import { credentialKinds, type CredentialKind } from '../../src/lib/credentials.ts'
 import { MAX_ESTIMATE_DAYS } from '../../src/lib/schedule.ts'
-import { attachmentProblem, attachmentTypes, extensionOf } from '../../src/lib/attachments.ts'
+import {
+  attachmentCategories,
+  attachmentProblem,
+  attachmentTypes,
+  extensionOf,
+  type AttachmentCategory,
+} from '../../src/lib/attachments.ts'
 
 /** Thrown for a request body that doesn't have the expected shape; becomes a 400. */
 export class BadRequest extends Error {}
@@ -536,9 +542,25 @@ export interface AttachmentInput {
   /** Media type, worked out from the file name (never taken from the caller). */
   type: string
   data: Buffer
+  category: AttachmentCategory
 }
 
-/** A file to attach: `{name, data}` with the contents as base64. */
+/** Which part of the spec a file is; leaving it out means "other". */
+export function attachmentCategory(value: unknown): AttachmentCategory {
+  if (value === undefined) return 'other'
+  if (typeof value !== 'string' || !(attachmentCategories as readonly string[]).includes(value))
+    throw new BadRequest(`category must be one of ${attachmentCategories.join(', ')}`)
+  return value as AttachmentCategory
+}
+
+/** A change to a file: `{category}`. */
+export function attachmentUpdate(value: unknown): AttachmentCategory {
+  const a = obj(value, 'body')
+  if (a.category === undefined) throw new BadRequest('category is required')
+  return attachmentCategory(a.category)
+}
+
+/** A file to attach: `{name, data, category?}` with the contents as base64. */
 export function attachmentInput(value: unknown): AttachmentInput {
   const a = obj(value, 'attachment')
   // No folders or control characters in a file name.
@@ -548,5 +570,5 @@ export function attachmentInput(value: unknown): AttachmentInput {
   const data = Buffer.from(a.data, 'base64')
   const problem = attachmentProblem(name, data.length)
   if (problem) throw new BadRequest(problem)
-  return { name, type: attachmentTypes[extensionOf(name)], data }
+  return { name, type: attachmentTypes[extensionOf(name)], data, category: attachmentCategory(a.category) }
 }

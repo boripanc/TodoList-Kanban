@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto'
 import type { CardRow } from '../../src/cloud/doc.ts'
 import type { InterfaceSpec, TeamMember } from '../../src/types.ts'
 import { applySpecPatch } from '../../src/lib/interfaces.ts'
+import type { AttachmentCategory } from '../../src/lib/attachments.ts'
 import { isDoneColumn } from '../../src/lib/done.ts'
 import { todayISO } from '../../src/lib/dates.ts'
 import { dueFromEstimate, needsDateRange, scheduleProblem, startWorkPatch } from '../../src/lib/schedule.ts'
@@ -948,6 +949,8 @@ export interface ApiAttachment {
   type: string
   /** Bytes. */
   size: number
+  /** Which part of the spec it is: technical, mapping or other. */
+  category: AttachmentCategory
   /** Email of the person who added it, or null when their account is gone. */
   uploadedBy: string | null
   uploadedAt: string
@@ -961,11 +964,12 @@ type AttachmentDbRow = {
   name: string
   type: string
   size: number
+  category: AttachmentCategory
   email: string | null
   uploaded_at: Date
 }
 
-const attachmentColumns = `a.id, a.card_id, a.name, a.type, a.size, u.email, a.uploaded_at
+const attachmentColumns = `a.id, a.card_id, a.name, a.type, a.size, a.category, u.email, a.uploaded_at
   from kanban.attachments a left join kanban.users u on u.id = a.uploaded_by`
 
 const toApiAttachment = (row: AttachmentDbRow): ApiAttachment => ({
@@ -974,6 +978,7 @@ const toApiAttachment = (row: AttachmentDbRow): ApiAttachment => ({
   name: row.name,
   type: row.type,
   size: Number(row.size),
+  category: row.category,
   uploadedBy: row.email,
   uploadedAt: iso(row.uploaded_at),
   url: `/api/v1/attachments/${row.id}`,
@@ -999,9 +1004,9 @@ export async function listAttachments(
 export async function addAttachment(db: Db, user: User, cardId: string, file: AttachmentInput): Promise<ApiAttachment> {
   const boardId = await cardBoard(db, user, cardId, canEdit)
   const { rows } = await db.query<{ id: string }>(
-    `insert into kanban.attachments (card_id, board_id, name, type, size, data, uploaded_by)
-     values ($1, $2, $3, $4, $5, $6, $7) returning id`,
-    [cardId, boardId, file.name, file.type, file.data.length, file.data, user.id],
+    `insert into kanban.attachments (card_id, board_id, name, type, size, data, uploaded_by, category)
+     values ($1, $2, $3, $4, $5, $6, $7, $8) returning id`,
+    [cardId, boardId, file.name, file.type, file.data.length, file.data, user.id, file.category],
   )
   const { rows: added } = await db.query<AttachmentDbRow>(`select ${attachmentColumns} where a.id = $1`, [rows[0].id])
   return toApiAttachment(added[0])
@@ -1016,6 +1021,19 @@ export async function getAttachment(db: Db, user: User, attachmentId: string) {
   )
   const row = rows[0]
   return { ...toApiAttachment(row), data: row.data }
+}
+
+/** Move a file to another part of the spec (technical, mapping or other). Needs editor or owner role. */
+export async function setAttachmentCategory(
+  db: Db,
+  user: User,
+  attachmentId: string,
+  category: AttachmentCategory,
+): Promise<ApiAttachment> {
+  await attachmentBoard(db, user, attachmentId, canEdit)
+  await db.query('update kanban.attachments set category = $2 where id = $1', [attachmentId, category])
+  const { rows } = await db.query<AttachmentDbRow>(`select ${attachmentColumns} where a.id = $1`, [attachmentId])
+  return toApiAttachment(rows[0])
 }
 
 /** Remove a file. Needs editor or owner role. */
