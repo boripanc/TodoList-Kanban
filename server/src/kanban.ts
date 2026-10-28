@@ -13,6 +13,7 @@ import { computeWorkload, loadLevel, mergeWorkloads, type LoadLevel, type Worklo
 import { canEdit, canRead, fail, requireRole, type Role, type User } from './access.ts'
 import type { Db, Queryable } from './db.ts'
 import type {
+  AttachmentInput,
   CardInput,
   CardQuery,
   ColumnInput,
@@ -935,4 +936,105 @@ export async function getWorkload(db: Db, user: User, boardId?: string): Promise
     })),
     unassigned: workload.unassigned.map(strip),
   }
+}
+
+// --- Attachments (files on cards, e.g. specs in Word or Excel) ---
+
+export interface ApiAttachment {
+  id: string
+  cardId: string
+  name: string
+  /** Media type, worked out from the file name. */
+  type: string
+  /** Bytes. */
+  size: number
+  /** Email of the person who added it, or null when their account is gone. */
+  uploadedBy: string | null
+  uploadedAt: string
+  /** Where to download it (with the same credentials). */
+  url: string
+}
+
+type AttachmentDbRow = {
+  id: string
+  card_id: string
+  name: string
+  type: string
+  size: number
+  email: string | null
+  uploaded_at: Date
+}
+
+const attachmentColumns = `a.id, a.card_id, a.name, a.type, a.size, u.email, a.uploaded_at
+  from kanban.attachments a left join kanban.users u on u.id = a.uploaded_by`
+
+const toApiAttachment = (row: AttachmentDbRow): ApiAttachment => ({
+  id: row.id,
+  cardId: row.card_id,
+  name: row.name,
+  type: row.type,
+  size: Number(row.size),
+  uploadedBy: row.email,
+  uploadedAt: iso(row.uploaded_at),
+  url: `/api/v1/attachments/${row.id}`,
+})
+
+/** Files on one board, or on one card when `cardId` is given, oldest first. */
+export async function listAttachments(
+  db: Db,
+  user: User,
+  where: { boardId: string } | { cardId: string },
+): Promise<ApiAttachment[]> {
+  const boardId = 'cardId' in where ? await cardBoard(db, user, where.cardId, canRead) : where.boardId
+  if ('boardId' in where) await requireRole(db, boardId, user.id, canRead)
+  const { rows } = await db.query<AttachmentDbRow>(
+    `select ${attachmentColumns} where a.board_id = $1 ${'cardId' in where ? 'and a.card_id = $2' : ''}
+     order by a.uploaded_at, a.id`,
+    'cardId' in where ? [boardId, where.cardId] : [boardId],
+  )
+  return rows.map(toApiAttachment)
+}
+
+/** Add a file to a card. Needs editor or owner role. */
+export async function addAttachment(db: Db, user: User, cardId: string, file: AttachmentInput): Promise<ApiAttachment> {
+  const boardId = await cardBoard(db, user, cardId, canEdit)
+  const { rows } = await db.query<{ id: string }>(
+    `insert into kanban.attachments (card_id, board_id, name, type, size, data, uploaded_by)
+     values ($1, $2, $3, $4, $5, $6, $7) returning id`,
+    [cardId, boardId, file.name, file.type, file.data.length, file.data, user.id],
+  )
+  const { rows: added } = await db.query<AttachmentDbRow>(`select ${attachmentColumns} where a.id = $1`, [rows[0].id])
+  return toApiAttachment(added[0])
+}
+
+/** One file with its contents, for anyone who can see the board. */
+export async function getAttachment(db: Db, user: User, attachmentId: string) {
+  const found = await attachmentBoard(db, user, attachmentId, canRead)
+  const { rows } = await db.query<AttachmentDbRow & { data: Uint8Array }>(
+    `select ${attachmentColumns.replace('a.uploaded_at', 'a.uploaded_at, a.data')} where a.id = $1`,
+    [found],
+  )
+  const row = rows[0]
+  return { ...toApiAttachment(row), data: row.data }
+}
+
+/** Remove a file. Needs editor or owner role. */
+export async function deleteAttachment(db: Db, user: User, attachmentId: string) {
+  await attachmentBoard(db, user, attachmentId, canEdit)
+  await db.query('delete from kanban.attachments where id = $1', [attachmentId])
+}
+
+/** Checks the caller's role on the file's board; a file on someone else's board is "not found". */
+async function attachmentBoard(q: Queryable, user: User, attachmentId: string, allowed: Role[]): Promise<string> {
+  const { rows } = await q.query<{ board_id: string }>('select board_id from kanban.attachments where id = $1', [
+    attachmentId,
+  ])
+  if (!rows[0]) fail(404, 'Attachment not found')
+  try {
+    await requireRole(q, rows[0].board_id, user.id, allowed)
+  } catch (error) {
+    if (error instanceof Error && 'status' in error && error.status === 404) fail(404, 'Attachment not found')
+    throw error
+  }
+  return attachmentId
 }

@@ -1,6 +1,7 @@
 import type {
   ApiKey,
   AssignmentRequest,
+  Attachment,
   CloudApi,
   ConnectedApp,
   CloudUser,
@@ -150,6 +151,13 @@ export function createServerApi(base: string): CloudApi {
     async rejectAssignment(boardId, cardId) {
       await call('POST', `/boards/${enc(boardId)}/assignment-requests/${enc(cardId)}/reject`)
     },
+
+    listAttachments: (boardId) => call<Attachment[]>('GET', `/v1/boards/${enc(boardId)}/attachments`),
+    addAttachment: (cardId, file) => call<Attachment>('POST', `/v1/cards/${enc(cardId)}/attachments`, file),
+    async deleteAttachment(attachmentId) {
+      await call('DELETE', `/v1/attachments/${enc(attachmentId)}`)
+    },
+    attachmentUrl: (attachmentId) => `${root}/v1/attachments/${enc(attachmentId)}`,
 
     listApiKeys: () => call<ApiKey[]>('GET', '/api-keys'),
     createApiKey: (name) => call<ApiKey & { key: string }>('POST', '/api-keys', { name }),

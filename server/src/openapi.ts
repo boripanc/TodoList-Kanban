@@ -264,6 +264,49 @@ export function openApiSpec() {
         },
         delete: { summary: 'Delete a card', operationId: 'deleteCard', responses: { 200: ok, ...errors } },
       },
+      '/boards/{boardId}/attachments': {
+        parameters: [boardId],
+        get: {
+          summary: 'Files attached to cards on a board',
+          operationId: 'listBoardAttachments',
+          responses: { 200: json({ type: 'array', items: ref('Attachment') }), ...errors },
+        },
+      },
+      '/cards/{cardId}/attachments': {
+        parameters: [cardId],
+        get: {
+          summary: 'Files attached to a card',
+          operationId: 'listCardAttachments',
+          responses: { 200: json({ type: 'array', items: ref('Attachment') }), ...errors },
+        },
+        post: {
+          summary: 'Attach a file to a card',
+          description:
+            'Word, Excel, PowerPoint, PDF, CSV, text, XML/XSD/WSDL, JSON, ZIP or an image, up to 10 MB. Needs editor or owner role.',
+          operationId: 'addAttachment',
+          requestBody: body({
+            type: 'object',
+            required: ['name', 'data'],
+            properties: {
+              name: { type: 'string', example: 'IF_S4_ORDERS05_spec.docx', description: 'File name; its extension sets the type' },
+              data: { type: 'string', format: 'byte', description: 'The file contents, base64' },
+            },
+          }),
+          responses: { 201: json(ref('Attachment'), 'Attached'), ...errors },
+        },
+      },
+      '/attachments/{attachmentId}': {
+        parameters: [pathParam('attachmentId', 'Attachment id')],
+        get: {
+          summary: 'Download a file',
+          operationId: 'getAttachment',
+          responses: {
+            200: { description: 'The file', content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } } },
+            ...errors,
+          },
+        },
+        delete: { summary: 'Remove a file', operationId: 'deleteAttachment', responses: { 200: ok, ...errors } },
+      },
       '/cards/{cardId}/progress': {
         parameters: [cardId],
         post: {
@@ -378,6 +421,19 @@ export function openApiSpec() {
             wipLimit: { type: 'integer' },
             position: { type: 'integer' },
             cards: { type: 'array', items: ref('Card') },
+          },
+        },
+        Attachment: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            cardId: { type: 'string' },
+            name: { type: 'string' },
+            type: { type: 'string', description: 'Media type' },
+            size: { type: 'integer', description: 'Bytes' },
+            uploadedBy: { type: 'string', nullable: true, description: 'Email of who added it' },
+            uploadedAt: { type: 'string', format: 'date-time' },
+            url: { type: 'string', description: 'Download address (GET, same credentials)' },
           },
         },
         Card: {

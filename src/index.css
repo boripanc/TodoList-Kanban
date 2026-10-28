@@ -1871,3 +1871,35 @@ textarea.masked {
   color: var(--muted);
   font-weight: 600;
 }
+
+/* Files attached to cards */
+.attachment-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 6px;
+}
+.attachment-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.attachment-list li .icon-button {
+  margin-left: auto;
+}
+.attachment-link {
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+.attachment-hint {
+  display: block;
+  margin-top: 4px;
+}
+.interface-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  font-size: 0.8rem;
+}

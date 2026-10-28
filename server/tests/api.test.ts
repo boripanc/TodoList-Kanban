@@ -789,6 +789,70 @@ describe('REST API (v1)', () => {
     expect(plain.data).toMatchObject({ title: 'Orders API v1', spec: null })
   })
 
+  it('attaches spec files to cards, downloads them and removes them, by role', async () => {
+    const ana = await ownerWithBoard()
+    const contents = Buffer.from('PK fake word file')
+    const file = { name: 'Orders spec.docx', data: contents.toString('base64') }
+
+    // The app (signed-in session) uploads through the same routes as automation.
+    const added = await ana.call('POST', '/v1/cards/c1/attachments', file)
+    expect(added.status).toBe(201)
+    expect(added.data).toMatchObject({
+      cardId: 'c1',
+      name: 'Orders spec.docx',
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      size: contents.length,
+      uploadedBy: 'ana@example.com',
+    })
+    const n8n = await apiKeyFor(ana)
+    const sheet = await n8n.call('POST', '/v1/cards/c1/attachments', {
+      name: 'mapping.xlsx',
+      data: Buffer.from('sheet').toString('base64'),
+    })
+    expect(sheet.status).toBe(201)
+    expect((await n8n.call('GET', '/v1/cards/c1/attachments')).data.map((a: { name: string }) => a.name)).toEqual([
+      'Orders spec.docx',
+      'mapping.xlsx',
+    ])
+    expect((await n8n.call('GET', '/v1/boards/b1/attachments')).data).toHaveLength(2)
+
+    const download = (key: string, id: string) =>
+      app.request(`/api/v1/attachments/${id}`, { headers: { 'x-api-key': key } })
+    const res = await download(n8n.key, added.data.id)
+    expect(res.status).toBe(200)
+    expect(Buffer.from(await res.arrayBuffer())).toEqual(contents)
+    expect(res.headers.get('content-disposition')).toContain("filename*=UTF-8''Orders%20spec.docx")
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(added.data.url).toBe(`/api/v1/attachments/${added.data.id}`)
+
+    // Only allowed types, a size limit, and real base64.
+    const bad = (body: object) => n8n.call('POST', '/v1/cards/c1/attachments', body)
+    expect((await bad({ name: 'run.exe', data: file.data })).status).toBe(400)
+    expect((await bad({ name: 'spec.html', data: file.data })).status).toBe(400)
+    expect((await bad({ name: 'empty.docx', data: '' })).status).toBe(400)
+    expect((await bad({ name: 'x.docx', data: 'not base64!' })).status).toBe(400)
+    const big = Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64')
+    expect((await bad({ name: 'big.xlsx', data: big })).data.error).toMatch(/larger than 10 MB/)
+    expect((await n8n.call('POST', '/v1/cards/nope/attachments', file)).status).toBe(404)
+
+    // Viewers read and download; they can't add or remove. Strangers see nothing.
+    const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
+    expect((await viewer.call('GET', '/v1/cards/c1/attachments')).data).toHaveLength(2)
+    expect((await download(viewer.key, added.data.id)).status).toBe(200)
+    expect((await viewer.call('POST', '/v1/cards/c1/attachments', file)).status).toBe(403)
+    expect((await viewer.call('DELETE', `/v1/attachments/${added.data.id}`)).status).toBe(403)
+    const stranger = await apiKeyFor(await signUp('eve@example.com'))
+    expect((await stranger.call('GET', '/v1/cards/c1/attachments')).status).toBe(404)
+    expect((await download(stranger.key, added.data.id)).status).toBe(404)
+    expect((await stranger.call('DELETE', `/v1/attachments/${added.data.id}`)).status).toBe(404)
+
+    expect((await n8n.call('DELETE', `/v1/attachments/${added.data.id}`)).status).toBe(200)
+    expect((await download(n8n.key, added.data.id)).status).toBe(404)
+    // Deleting the card deletes its files.
+    await n8n.call('DELETE', '/v1/cards/c1')
+    expect((await db.query('select id from kanban.attachments')).rows).toEqual([])
+  })
+
   it('gives API keys their owner’s role on each board', async () => {
     const ana = await ownerWithBoard()
     const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
@@ -1021,6 +1085,19 @@ describe('MCP endpoint', () => {
     expect((await call(viewer, 'update_card', { cardId: created.id, spec: { status: 'agreed' } })).error).toMatch(
       /permission/,
     )
+  })
+
+  it('lists attached files', async () => {
+    const ana = await ownerWithBoard()
+    const n8n = await apiKeyFor(ana)
+    await n8n.call('POST', '/v1/cards/c1/attachments', { name: 'spec.docx', data: Buffer.from('x').toString('base64') })
+    const call = async (args: object) =>
+      JSON.parse((await rpc(n8n, 'tools/call', { name: 'list_attachments', arguments: args })).data.result.content[0].text)
+    expect(await call({ cardId: 'c1' })).toEqual([expect.objectContaining({ name: 'spec.docx', size: 1 })])
+    expect(await call({ boardId: 'b1' })).toHaveLength(1)
+    const stranger = await apiKeyFor(await signUp('eve@example.com'))
+    const refused = await rpc(stranger, 'tools/call', { name: 'list_attachments', arguments: { cardId: 'c1' } })
+    expect(refused.data.result.isError).toBe(true)
   })
 
   it('returns refusals and bad input as tool errors, and unknown methods as JSON-RPC errors', async () => {

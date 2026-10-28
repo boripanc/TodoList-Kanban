@@ -4,6 +4,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { HTTPException } from 'hono/http-exception'
 import { streamSSE } from 'hono/streaming'
 import type { CardRow, ColumnRow } from '../../src/cloud/doc.ts'
+import { ATTACHMENT_MAX_BYTES } from '../../src/lib/attachments.ts'
 import { fail, requireRole, type Role, type User } from './access.ts'
 import { API_KEY_PREFIX, hashPassword, hashToken, MIN_PASSWORD_LENGTH, newToken, verifyPassword } from './auth.ts'
 import type { Db, Queryable } from './db.ts'
@@ -65,7 +66,14 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
     return c.json({ error: 'Something went wrong on the server.' }, 500)
   })
 
-  app.use(bodyLimit({ maxSize: 2 * 1024 * 1024 }))
+  // Uploads carry a file of up to 10 MB as base64 (a third larger); everything else stays small.
+  const smallBodies = bodyLimit({ maxSize: 2 * 1024 * 1024 })
+  const uploads = bodyLimit({ maxSize: Math.ceil((ATTACHMENT_MAX_BYTES * 4) / 3) + 64 * 1024 })
+  app.use((c, next) =>
+    c.req.method === 'POST' && /^\/api\/v1\/cards\/[^/]+\/attachments$/.test(c.req.path)
+      ? uploads(c, next)
+      : smallBodies(c, next),
+  )
 
   // Changes must be JSON: browsers can't send that cross-site without a CORS
   // preflight, which this server never allows. Together with SameSite cookies

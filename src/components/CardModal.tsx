@@ -12,6 +12,7 @@ import { ProgressEditor } from './ProgressEditor'
 import { AssigneePicker } from './Team'
 import { PendingAssignment } from './Assignments'
 import { SpecEditor } from './Interfaces'
+import { CardFiles } from './Attachments'
 import { useCloud } from '../cloud/context'
 
 const priorities: Priority[] = ['none', 'low', 'medium', 'high', 'urgent']
@@ -112,6 +113,7 @@ export function CardModal({
             </label>
 
             <SpecEditor card={card} readOnly={readOnly} />
+            <CardFiles board={board} card={card} readOnly={readOnly} />
 
             <div className="field">
               <span>

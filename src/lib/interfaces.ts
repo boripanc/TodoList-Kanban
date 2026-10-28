@@ -171,8 +171,12 @@ export function listInterfaces<C extends SpecCard>(
   return { members, unassigned, total: withSpec.length }
 }
 
-/** All interface specs on a board as one Markdown document, grouped by person. */
-export function specsMarkdown<C extends SpecCard>(boardTitle: string, list: InterfaceList<C>): string {
+/** All interface specs on a board as one Markdown document, grouped by person, naming each one's attached files. */
+export function specsMarkdown<C extends SpecCard>(
+  boardTitle: string,
+  list: InterfaceList<C>,
+  files: Record<string, string[]> = {},
+): string {
   const out: string[] = [`# ${boardTitle}: interface specs`, '']
   const section = (heading: string, items: InterfaceItem<C>[]) => {
     if (items.length === 0) return
@@ -188,6 +192,7 @@ export function specsMarkdown<C extends SpecCard>(boardTitle: string, list: Inte
         `- Column: ${column}`,
       )
       if (spec.endpoint.trim()) out.push(`- iFlow / endpoint: \`${spec.endpoint.trim()}\``)
+      if (files[card.id]?.length) out.push(`- Files: ${files[card.id].join(', ')}`)
       out.push('')
       for (const field of specFields.slice(3)) {
         const text = spec[field.key].trim()
