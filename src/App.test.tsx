@@ -12,6 +12,7 @@ import { extractBoardDoc } from './cloud/doc'
 import { initialState, reducer } from './state/reducer'
 import { todayISO } from './lib/dates'
 import { dueFromEstimate } from './lib/schedule'
+import { emptySpec } from './lib/interfaces'
 
 function renderApp() {
   return render(
@@ -357,9 +358,10 @@ describe('App', () => {
     await user.selectOptions(within(spec).getByLabelText('Receiver adapter'), 'odata')
     await user.selectOptions(within(spec).getByLabelText('Message mode'), 'sync')
     await user.type(within(spec).getByLabelText('iFlow / endpoint'), 'ORDERS05')
-    await user.type(within(spec).getByLabelText('Source message'), 'IDoc ORDERS05')
+    expect(within(spec).queryByLabelText('Source message')).not.toBeInTheDocument()
+    expect(within(spec).queryByLabelText('Target message and mapping')).not.toBeInTheDocument()
     await user.selectOptions(within(spec).getByLabelText('Spec status'), 'agreed')
-    expect(within(spec).getByRole('status')).toHaveTextContent('Agreed, but still empty: Target message and mapping, Notes')
+    expect(within(spec).getByRole('status')).toHaveTextContent('Agreed, but still empty: Notes')
     await user.keyboard('{Escape}')
 
     const column = screen.getByRole('region', { name: 'Column: Spec' })
@@ -420,7 +422,7 @@ describe('storage', () => {
     )
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 1, cards }))
     const state = loadState()
-    expect(state.version).toBe(6)
+    expect(state.version).toBe(7)
     expect(Object.keys(state.cards)).toEqual(Object.keys(saved.cards))
     for (const card of Object.values(state.cards)) expect(card.progressLog).toEqual([])
   })
@@ -433,7 +435,7 @@ describe('storage', () => {
     const boards = Object.fromEntries(Object.entries(saved.boards).map(([id, { team: _t, ...board }]) => [id, board]))
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 2, boards, cards }))
     const state = loadState()
-    expect(state.version).toBe(6)
+    expect(state.version).toBe(7)
     for (const board of Object.values(state.boards)) expect(board.team).toEqual([])
     for (const card of Object.values(state.cards)) expect(card.assigneeIds).toEqual([])
   })
@@ -445,7 +447,7 @@ describe('storage', () => {
     )
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 4, cards }))
     const state = loadState()
-    expect(state.version).toBe(6)
+    expect(state.version).toBe(7)
     for (const card of Object.values(state.cards)) expect(card.estimateDays).toBeNull()
   })
 
@@ -454,8 +456,22 @@ describe('storage', () => {
     const cards = Object.fromEntries(Object.entries(saved.cards).map(([id, { spec: _s, ...card }]) => [id, card]))
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 5, cards }))
     const state = loadState()
-    expect(state.version).toBe(6)
+    expect(state.version).toBe(7)
     for (const card of Object.values(state.cards)) expect(card.spec).toBeNull()
+  })
+
+  it('moves text from the old source and target message fields into the notes', () => {
+    const saved = createSampleState()
+    const [id, card] = Object.entries(saved.cards)[0]
+    const oldSpec = { ...emptySpec(), notes: 'OAuth', input: 'IDoc ORDERS05', output: 'Map to SalesOrder' }
+    const cards = { ...saved.cards, [id]: { ...card, spec: oldSpec } }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 6, cards }))
+    const state = loadState()
+    expect(state.version).toBe(7)
+    expect(state.cards[id].spec).not.toHaveProperty('input')
+    expect(state.cards[id].spec?.notes).toBe(
+      'OAuth\n\nSource message:\nIDoc ORDERS05\n\nTarget message and mapping:\nMap to SalesOrder',
+    )
   })
 
   it('upgrades cards saved before start dates existed', () => {
@@ -463,7 +479,7 @@ describe('storage', () => {
     const cards = Object.fromEntries(Object.entries(saved.cards).map(([id, { startDate: _s, ...card }]) => [id, card]))
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 3, cards }))
     const state = loadState()
-    expect(state.version).toBe(6)
+    expect(state.version).toBe(7)
     for (const card of Object.values(state.cards)) expect(card.startDate).toBeNull()
   })
 })
@@ -654,7 +670,8 @@ describe('accounts and sharing', () => {
     await user.upload(within(card).getByLabelText('Choose files to attach'), [word, sheet])
     const list = await within(card).findByRole('list', { name: 'Attached files' })
     await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(2))
-    const link = within(list).getByRole('link', { name: /Packing spec\.docx/ })
+    expect(within(list).getByRole('button', { name: 'View Packing spec.docx' })).toBeInTheDocument()
+    const link = within(list).getByRole('link', { name: 'Download Packing spec.docx' })
     expect(link).toHaveAttribute('download', 'Packing spec.docx')
     expect(link.getAttribute('href')).toMatch(/^data:application\/vnd\.openxml/)
     expect(server.attachments.map((a) => [a.boardId, a.name, atob(a.data)])).toEqual([
@@ -679,6 +696,56 @@ describe('accounts and sharing', () => {
     expect(await within(card).findByText('Files (1)')).toBeInTheDocument()
   })
 
+  it('keeps technical and mapping spec files apart and shows them in the app', async () => {
+    const user = userEvent.setup()
+    const { server, ana } = await serverWithTrip()
+    renderWithCloud(server.client(ana))
+    const trip = await screen.findByRole('option', { name: 'Trip' })
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Current board' }), trip)
+
+    await user.click(await screen.findByText('Pack bags'))
+    const card = screen.getByRole('dialog', { name: 'Edit card: Pack bags' })
+    await user.click(within(card).getByRole('button', { name: '+ Add interface spec' }))
+    const technical = within(card).getByRole('region', { name: 'Technical spec' })
+    const mapping = within(card).getByRole('region', { name: 'Mapping spec' })
+    expect(within(card).getByRole('region', { name: 'Other files' })).toBeInTheDocument()
+
+    await user.upload(within(technical).getByLabelText('Choose technical spec files'), [
+      new File(['Use OAuth.\nRetry 3 times.'], 'design.txt', { type: 'text/plain' }),
+    ])
+    await user.upload(within(mapping).getByLabelText('Choose mapping spec files'), [
+      new File(['Source,Target\nMATNR,"sku, code"'], 'fields.csv', { type: 'text/csv' }),
+    ])
+    await within(technical).findByRole('button', { name: 'View design.txt' })
+    await within(mapping).findByRole('button', { name: 'View fields.csv' })
+    expect(server.attachments.map((a) => [a.name, a.category])).toEqual([
+      ['design.txt', 'technical'],
+      ['fields.csv', 'mapping'],
+    ])
+
+    // A text file opens as text, over the card, and Escape closes only the preview.
+    await user.click(within(technical).getByRole('button', { name: 'View design.txt' }))
+    const preview = await screen.findByRole('dialog', { name: 'View design.txt' })
+    expect(await within(preview).findByText(/Use OAuth\.\s+Retry 3 times\./)).toBeInTheDocument()
+    expect(within(preview).getByRole('link', { name: '⬇ Download' })).toHaveAttribute('download', 'design.txt')
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog', { name: 'View design.txt' })).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Edit card: Pack bags' })).toBeInTheDocument()
+
+    // A CSV file opens as a table.
+    await user.click(within(mapping).getByRole('button', { name: 'View fields.csv' }))
+    const table = await screen.findByRole('table', { name: 'fields.csv' })
+    expect(within(table).getAllByRole('row')).toHaveLength(2)
+    expect(within(table).getByText('sku, code')).toBeInTheDocument()
+    await user.click(within(screen.getByRole('dialog', { name: 'View fields.csv' })).getByRole('button', { name: 'Close' }))
+
+    // A file can move to another section.
+    await user.selectOptions(within(technical).getByLabelText('Section for design.txt'), 'mapping')
+    await waitFor(() => expect(within(mapping).getAllByRole('listitem')).toHaveLength(2))
+    expect(server.attachments.map((a) => a.category)).toEqual(['mapping', 'mapping'])
+    expect(within(technical).queryByRole('listitem')).not.toBeInTheDocument()
+  })
+
   it('shows files read-only to viewers', async () => {
     const { server, ana, boardId } = await serverWithTrip()
     const anaApi = server.client(ana)
@@ -689,7 +756,8 @@ describe('accounts and sharing', () => {
     renderWithCloud(server.client(server.addUser('cat@example.com')))
     await user.click(await screen.findByText('Pack bags'))
     const card = screen.getByRole('dialog', { name: 'Card: Pack bags' })
-    expect(await within(card).findByRole('link', { name: /spec\.pdf/ })).toBeInTheDocument()
+    expect(await within(card).findByRole('button', { name: 'View spec.pdf' })).toBeInTheDocument()
+    expect(within(card).getByRole('link', { name: 'Download spec.pdf' })).toBeInTheDocument()
     expect(within(card).queryByLabelText('Choose files to attach')).not.toBeInTheDocument()
     expect(within(card).queryByRole('button', { name: 'Remove spec.pdf' })).not.toBeInTheDocument()
   })

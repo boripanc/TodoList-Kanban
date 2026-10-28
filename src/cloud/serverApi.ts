@@ -154,6 +154,21 @@ export function createServerApi(base: string): CloudApi {
 
     listAttachments: (boardId) => call<Attachment[]>('GET', `/v1/boards/${enc(boardId)}/attachments`),
     addAttachment: (cardId, file) => call<Attachment>('POST', `/v1/cards/${enc(cardId)}/attachments`, file),
+    setAttachmentCategory: (attachmentId, category) =>
+      call<Attachment>('PATCH', `/v1/attachments/${enc(attachmentId)}`, { category }),
+    async fetchAttachment(attachmentId) {
+      let res: Response
+      try {
+        res = await fetch(`${root}/v1/attachments/${enc(attachmentId)}`, { credentials: 'same-origin' })
+      } catch {
+        throw new UnreachableError('Could not reach the server. Check your connection.')
+      }
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new HttpError(res.status, data.error ?? `The server answered ${res.status}.`)
+      }
+      return res.blob()
+    },
     async deleteAttachment(attachmentId) {
       await call('DELETE', `/v1/attachments/${enc(attachmentId)}`)
     },

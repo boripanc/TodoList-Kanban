@@ -1,4 +1,4 @@
-import { attachmentProblem, attachmentTypes, extensionOf } from '../lib/attachments'
+import { attachmentCategories, attachmentProblem, attachmentTypes, extensionOf } from '../lib/attachments'
 import type { Role } from '../types'
 import type {
   ApiKey,
@@ -341,18 +341,38 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
       const size = atob(file.data).length
       const problem = attachmentProblem(file.name, size)
       if (problem) throw new Error(problem)
+      if (file.category !== undefined && !attachmentCategories.includes(file.category))
+        throw new Error(`category must be one of ${attachmentCategories.join(', ')}`)
       const attachment: Attachment = {
         id: server.token(),
         cardId,
         name: file.name,
         type: attachmentTypes[extensionOf(file.name)],
         size,
+        category: file.category ?? 'other',
         uploadedBy: me().email,
         uploadedAt: new Date().toISOString(),
       }
       server.attachments.push({ ...attachment, boardId: card.board_id, data: file.data })
       server.touch(card.board_id)
       return { ...attachment }
+    },
+    async setAttachmentCategory(attachmentId, category) {
+      const found = server.attachments.find((a) => a.id === attachmentId)
+      if (!found || !server.role(found.boardId, user?.id)) throw new Error('Attachment not found')
+      canEdit(found.boardId)
+      if (!attachmentCategories.includes(category))
+        throw new Error(`category must be one of ${attachmentCategories.join(', ')}`)
+      found.category = category
+      server.touch(found.boardId)
+      const { boardId: _b, data: _d, ...a } = found
+      return { ...a }
+    },
+    async fetchAttachment(attachmentId) {
+      const found = server.attachments.find((a) => a.id === attachmentId)
+      if (!found || !server.role(found.boardId, user?.id)) throw new Error('Attachment not found')
+      const bytes = Uint8Array.from(atob(found.data), (ch) => ch.charCodeAt(0))
+      return new Blob([bytes], { type: found.type })
     },
     async deleteAttachment(attachmentId) {
       const found = server.attachments.find((a) => a.id === attachmentId)

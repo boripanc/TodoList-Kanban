@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { InterfaceSpec, TeamMember } from '../types'
-import { applySpecPatch, emptySpec, listInterfaces, routeText, missingSpecFields, SPEC_TEXT_MAX, specsMarkdown } from './interfaces'
+import { applySpecPatch, emptySpec, listInterfaces, routeText, missingSpecFields, SPEC_TEXT_MAX, specsMarkdown, withoutMessageFields } from './interfaces'
 
 const team: TeamMember[] = [
   { id: 'm1', name: 'Kim', color: '#0090ff', capacity: 0 },
@@ -42,13 +42,9 @@ describe('interfaces', () => {
   })
 
   it('names the empty fields and writes all specs as Markdown', () => {
-    expect(missingSpecFields(spec({ senderSystem: 'S/4', receiverSystem: 'CRM', endpoint: 'x', input: ' ' }))).toEqual([
-      'Source message',
-      'Target message and mapping',
-      'Notes',
-    ])
+    expect(missingSpecFields(spec({ senderSystem: 'S/4', receiverSystem: 'CRM', endpoint: 'x', notes: ' ' }))).toEqual(['Notes'])
     const list = listInterfaces(team, [
-      { card: card('Create order', ['m1'], spec({ senderSystem: 'S/4HANA', receiverAdapter: 'odata', endpoint: 'ORDERS05', input: '{ sku }' })), column: 'Spec', done: false },
+      { card: card('Create order', ['m1'], spec({ senderSystem: 'S/4HANA', receiverAdapter: 'odata', endpoint: 'ORDERS05', notes: 'Basic auth' })), column: 'Spec', done: false },
     ])
     const md = specsMarkdown('Checkout', list, { 'Create order': ['spec.docx', 'mapping.xlsx'] })
     expect(md).toContain('# Checkout: interface specs')
@@ -58,8 +54,18 @@ describe('interfaces', () => {
     expect(md).toContain('- Mode: Asynchronous')
     expect(md).toContain('- Files: spec.docx, mapping.xlsx')
     expect(md).toContain('- iFlow / endpoint: `ORDERS05`')
-    expect(md).toContain('**Source message**\n\n{ sku }')
-    expect(md).not.toContain('**Target message')
+    expect(md).toContain('**Notes**\n\nBasic auth')
+    expect(md).not.toContain('Source message')
     expect(md).not.toContain('## Lee')
+  })
+
+  it('moves text from the old message fields into the notes', () => {
+    const old = { ...spec({ notes: 'OAuth' }), input: 'IDoc ORDERS05', output: ' ' }
+    const moved = withoutMessageFields(old)
+    expect(moved).not.toHaveProperty('input')
+    expect(moved).not.toHaveProperty('output')
+    expect(moved.notes).toBe('OAuth\n\nSource message:\nIDoc ORDERS05')
+    expect(withoutMessageFields(spec({ notes: 'kept as is ' })).notes).toBe('kept as is ')
+    expect(withoutMessageFields({ ...spec(), output: 'Map A to B' }).notes).toBe('Target message and mapping:\nMap A to B')
   })
 })

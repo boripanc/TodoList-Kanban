@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react'
 import type { Action } from '../state/reducer'
 import type { AssignmentRequest, Attachment, CloudApi, CloudUser, ReceivedInvite } from './api'
+import type { AttachmentCategory } from '../lib/attachments'
 
 export interface Cloud {
   api: CloudApi
@@ -32,7 +33,9 @@ export interface Cloud {
   /** Files on the current board's cards, oldest first. */
   attachments: Attachment[]
   /** Attach a file to a card on the current board (editors and owners). */
-  addAttachment: (cardId: string, file: File) => Promise<void>
+  addAttachment: (cardId: string, file: File, category?: AttachmentCategory) => Promise<void>
+  /** Move a file to another part of the spec. */
+  setAttachmentCategory: (attachmentId: string, category: AttachmentCategory) => Promise<void>
   deleteAttachment: (attachmentId: string) => Promise<void>
   /** Resolves once changes made so far have reached the server. */
   saved: () => Promise<void>

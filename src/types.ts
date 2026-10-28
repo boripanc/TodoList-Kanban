@@ -76,10 +76,6 @@ export interface InterfaceSpec {
   mode: MessageMode
   /** The iFlow name or address, e.g. "/orders/create" or an IDoc type. */
   endpoint: string
-  /** The source message: structure, sample, IDoc type or file layout. */
-  input: string
-  /** The target message and mapping, response or acknowledgement. */
-  output: string
   /** Anything else: auth, error handling, retries, volume, schedule. */
   notes: string
   status: SpecStatus
@@ -133,7 +129,7 @@ export interface Board {
 }
 
 export interface AppState {
-  version: 6
+  version: 7
   boardOrder: string[]
   activeBoardId: string | null
   boards: Record<string, Board>

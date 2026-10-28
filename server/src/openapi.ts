@@ -1,6 +1,7 @@
 // OpenAPI description of the REST API in server/src/rest.ts, served at
 // GET /api/v1/openapi.json. Keep the two in step.
 import { adapterTypes, messageModes, specStatuses } from '../../src/lib/interfaces.ts'
+import { attachmentCategories } from '../../src/lib/attachments.ts'
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` })
 const json = (schema: object, description = 'OK') => ({ description, content: { 'application/json': { schema } } })
@@ -32,6 +33,13 @@ const query = (name: string, description: string, schema: object = { type: 'stri
 })
 const priority = { type: 'string', enum: ['none', 'low', 'medium', 'high', 'urgent'] }
 const date = { type: 'string', format: 'date', example: '2026-12-31' }
+const categoryProperty = {
+  type: 'string',
+  enum: attachmentCategories,
+  default: 'other',
+  description: 'Which part of the interface spec the file is: technical spec, mapping spec or other',
+}
+
 const specProperties = {
   senderSystem: { type: 'string', description: 'System that sends the message, e.g. S/4HANA PRD' },
   senderAdapter: { type: 'string', enum: adapterTypes, description: 'CPI sender adapter' },
@@ -39,8 +47,6 @@ const specProperties = {
   receiverAdapter: { type: 'string', enum: adapterTypes, description: 'CPI receiver adapter' },
   mode: { type: 'string', enum: messageModes, description: 'async or sync' },
   endpoint: { type: 'string', description: 'iFlow name or address, IDoc type or folder' },
-  input: { type: 'string', description: 'Source message: structure, sample or file layout' },
-  output: { type: 'string', description: 'Target message and mapping, response or acknowledgement' },
   notes: { type: 'string', description: 'Auth, error handling, retries, volume, schedule' },
   status: { type: 'string', enum: specStatuses, description: 'draft, review or agreed' },
 }
@@ -290,6 +296,7 @@ export function openApiSpec() {
             properties: {
               name: { type: 'string', example: 'IF_S4_ORDERS05_spec.docx', description: 'File name; its extension sets the type' },
               data: { type: 'string', format: 'byte', description: 'The file contents, base64' },
+              category: categoryProperty,
             },
           }),
           responses: { 201: json(ref('Attachment'), 'Attached'), ...errors },
@@ -304,6 +311,13 @@ export function openApiSpec() {
             200: { description: 'The file', content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } } },
             ...errors,
           },
+        },
+        patch: {
+          summary: 'Move a file to another part of the spec',
+          description: 'Needs editor or owner role.',
+          operationId: 'updateAttachment',
+          requestBody: body({ type: 'object', required: ['category'], properties: { category: categoryProperty } }),
+          responses: { 200: json(ref('Attachment')), ...errors },
         },
         delete: { summary: 'Remove a file', operationId: 'deleteAttachment', responses: { 200: ok, ...errors } },
       },
@@ -431,6 +445,7 @@ export function openApiSpec() {
             name: { type: 'string' },
             type: { type: 'string', description: 'Media type' },
             size: { type: 'integer', description: 'Bytes' },
+            category: categoryProperty,
             uploadedBy: { type: 'string', nullable: true, description: 'Email of who added it' },
             uploadedAt: { type: 'string', format: 'date-time' },
             url: { type: 'string', description: 'Download address (GET, same credentials)' },

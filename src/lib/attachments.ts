@@ -1,6 +1,17 @@
 // Files attached to cards, such as interface specs in Word or Excel. Shared by
 // the app and the server, which stores them in Postgres (kanban.attachments).
 
+/** Which part of an interface spec a file is. */
+export type AttachmentCategory = 'technical' | 'mapping' | 'other'
+
+export const attachmentCategories: readonly AttachmentCategory[] = ['technical', 'mapping', 'other']
+
+export const categoryName: Record<AttachmentCategory, string> = {
+  technical: 'Technical spec',
+  mapping: 'Mapping spec',
+  other: 'Other files',
+}
+
 /** Largest file a card can take. */
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
 
@@ -60,4 +71,17 @@ export function attachmentIcon(name: string): string {
   if (ext === 'pdf') return '📕'
   if (['png', 'jpg', 'jpeg'].includes(ext)) return '🖼'
   return '📄'
+}
+
+/** How the app can show a file in the browser, or null when it can only be downloaded. */
+export type PreviewKind = 'word' | 'excel' | 'pdf' | 'image' | 'text'
+
+export function previewKind(name: string): PreviewKind | null {
+  const ext = extensionOf(name)
+  if (ext === 'docx') return 'word'
+  if (ext === 'xlsx' || ext === 'xlsm') return 'excel'
+  if (ext === 'pdf') return 'pdf'
+  if (['png', 'jpg', 'jpeg'].includes(ext)) return 'image'
+  if (['csv', 'txt', 'xml', 'xsd', 'wsdl', 'json'].includes(ext)) return 'text'
+  return null
 }
