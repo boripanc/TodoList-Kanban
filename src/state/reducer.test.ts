@@ -149,6 +149,26 @@ describe('cards', () => {
     })
   })
 
+  it('adds a card with its R4C and DD numbers, trimmed, and copies them when duplicating', () => {
+    let { state, board } = workBoard()
+    state = reducer(state, {
+      type: 'card/add',
+      columnId: board.columnIds[0],
+      id: 'c1',
+      title: 'Payroll fix',
+      now,
+      details: { r4cNo: '  R4C-1024 ', ddNo: 'DD-'.padEnd(150, '9') },
+    })
+    expect(state.cards.c1.r4cNo).toBe('R4C-1024')
+    expect(state.cards.c1.ddNo).toHaveLength(100)
+    state = reducer(state, { type: 'card/update', cardId: 'c1', patch: { ddNo: 'DD-7' }, now })
+    state = reducer(state, { type: 'card/duplicate', cardId: 'c1', newId: 'c2', now })
+    expect(state.cards.c2).toMatchObject({ r4cNo: 'R4C-1024', ddNo: 'DD-7' })
+    // Cards added without details have none.
+    state = reducer(state, { type: 'card/add', columnId: board.columnIds[0], id: 'c3', title: 'Plain', now })
+    expect(state.cards.c3).toMatchObject({ r4cNo: '', ddNo: '' })
+  })
+
   it('does not add a card with an empty title', () => {
     const { state, board } = workBoard()
     expect(reducer(state, { type: 'card/add', columnId: board.columnIds[0], id: 'x', title: ' ', now })).toBe(state)

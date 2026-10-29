@@ -309,6 +309,30 @@ describe('boards', () => {
     expect(refused.status).toBe(403)
   })
 
+  it('syncs R4C and DD numbers, and keeps them when an older app leaves them out', async () => {
+    const ana = await ownerWithBoard()
+    await ana.call('POST', '/boards/b1/changes', {
+      upsertCards: [{ ...card('c1', 'Book flights', 'col1', 0), r4c_no: ' R4C-1024 ', dd_no: 'DD-77' }],
+    })
+    const stored = () => ana.call('GET', '/boards/b1').then((r) => r.data.cards[0])
+    expect(await stored()).toMatchObject({ r4c_no: 'R4C-1024', dd_no: 'DD-77' })
+    await ana.call('POST', '/boards/b1/changes', { upsertCards: [card('c1', 'Book cheap flights', 'col1', 0)] })
+    expect(await stored()).toMatchObject({ title: 'Book cheap flights', r4c_no: 'R4C-1024', dd_no: 'DD-77' })
+    await ana.call('POST', '/boards/b1/changes', {
+      upsertCards: [{ ...card('c1', 'Book cheap flights', 'col1', 0), r4c_no: '', dd_no: 'DD-78' }],
+    })
+    expect(await stored()).toMatchObject({ r4c_no: '', dd_no: 'DD-78' })
+    const bad = await ana.call('POST', '/boards/b1/changes', {
+      upsertCards: [{ ...card('c1', 'x'), r4c_no: 'x'.repeat(101), dd_no: '' }],
+    })
+    expect(bad.status).toBe(400)
+    const viewer = await share(ana, 'ben@example.com', 'viewer')
+    const refused = await viewer.call('POST', '/boards/b1/changes', {
+      upsertCards: [{ ...card('c1', 'x', 'col1', 0), r4c_no: '1', dd_no: '2' }],
+    })
+    expect(refused.status).toBe(403)
+  })
+
   it('syncs interface specs, and keeps them when an older app leaves them out', async () => {
     const ana = await ownerWithBoard()
     const spec = {
@@ -785,6 +809,24 @@ describe('REST API (v1)', () => {
     expect((await viewer.call('PATCH', `/v1/cards/${fix.id}`, { estimateDays: 4 })).status).toBe(403)
   })
 
+  it('sets, clears and finds R4C and DD numbers', async () => {
+    const ana = await ownerWithBoard()
+    const n8n = await apiKeyFor(ana)
+    const made = await n8n.call('POST', '/v1/boards/b1/cards', { column: 'To do', title: 'Fix import', r4cNo: 'R4C-55' })
+    expect(made.data).toMatchObject({ r4cNo: 'R4C-55', ddNo: '' })
+    const id = made.data.id
+    expect((await n8n.call('PATCH', `/v1/cards/${id}`, { ddNo: ' DD-9 ' })).data).toMatchObject({
+      r4cNo: 'R4C-55',
+      ddNo: 'DD-9',
+    })
+    expect((await n8n.call('GET', '/v1/cards?search=dd-9')).data.map((c: { id: string }) => c.id)).toEqual([id])
+    expect((await n8n.call('PATCH', `/v1/cards/${id}`, { r4cNo: null })).data.r4cNo).toBe('')
+    expect((await n8n.call('PATCH', `/v1/cards/${id}`, { ddNo: 5 })).status).toBe(400)
+    expect((await n8n.call('PATCH', `/v1/cards/${id}`, { ddNo: 'x'.repeat(101) })).status).toBe(400)
+    const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
+    expect((await viewer.call('PATCH', `/v1/cards/${id}`, { r4cNo: 'R4C-1' })).status).toBe(403)
+  })
+
   it('keeps interface specs on cards and finds interface cards', async () => {
     const ana = await ownerWithBoard()
     const n8n = await apiKeyFor(ana)
@@ -1120,6 +1162,9 @@ describe('MCP endpoint', () => {
     expect(await call('update_card', { cardId: dated.id, startDate: '2026-11-02' })).toMatchObject({
       startDate: '2026-11-02',
     })
+    const numbered = await call('create_card', { boardId: 'b1', column: 'To do', title: 'Fix EDI', r4cNo: 'R4C-7', ddNo: 'DD-3' })
+    expect(numbered).toMatchObject({ r4cNo: 'R4C-7', ddNo: 'DD-3' })
+    expect(await call('update_card', { cardId: numbered.id, ddNo: '' })).toMatchObject({ r4cNo: 'R4C-7', ddNo: '' })
     const sized = await call('create_card', { boardId: 'b1', column: 'To do', title: 'Fix mapping', estimateDays: 2 })
     expect(sized).toMatchObject({ estimateDays: 2, startDate: null })
     // Moving into progress with move_card starts it; Done isn't "in progress", so a new column is added.

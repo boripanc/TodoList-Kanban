@@ -3,6 +3,7 @@ import type { InterfaceSpec, ProgressEntry, TeamMember } from '../../src/types.t
 import { adapterTypes, messageModes, SPEC_TEXT_MAX, specFields, specStatuses } from '../../src/lib/interfaces.ts'
 import type { ContactInput, CredentialField, CredentialInput } from '../../src/cloud/api.ts'
 import { credentialKinds, type CredentialKind } from '../../src/lib/credentials.ts'
+import { cleanRef, MAX_REF_LENGTH } from '../../src/lib/refs.ts'
 import { MAX_ESTIMATE_DAYS } from '../../src/lib/schedule.ts'
 import {
   attachmentCategories,
@@ -27,6 +28,13 @@ function str(value: unknown, what: string, max = 500): string {
   if (typeof value !== 'string' || value.length > max)
     throw new BadRequest(`${what} must be text up to ${max} characters`)
   return value
+}
+
+/** An R4C or DD number: text up to MAX_REF_LENGTH characters once trimmed. */
+function refNo(value: unknown, what: string): string {
+  if (typeof value !== 'string' || value.trim().length > MAX_REF_LENGTH)
+    throw new BadRequest(`${what} must be text up to ${MAX_REF_LENGTH} characters`)
+  return cleanRef(value)
 }
 
 function id(value: unknown, what: string): string {
@@ -163,6 +171,10 @@ export function cardRow(value: unknown, boardId: string): CardRow {
     due_date: c.due_date === null ? null : str(c.due_date, 'due_date', 10),
     // Apps from before estimates existed leave it out; the database then keeps what it has.
     ...(c.estimate_days === undefined ? {} : { estimate_days: estimate(c.estimate_days, 'estimate_days') }),
+    // Apps from before R4C and DD numbers existed leave both out; the database then keeps what it has.
+    ...(c.r4c_no === undefined || c.dd_no === undefined
+      ? {}
+      : { r4c_no: refNo(c.r4c_no, 'r4c_no'), dd_no: refNo(c.dd_no, 'dd_no') }),
     checklist: arr(c.checklist, 'checklist', 500).map((item) => {
       const i = obj(item, 'checklist item')
       if (typeof i.done !== 'boolean') throw new BadRequest('checklist done must be true or false')
@@ -256,6 +268,10 @@ export interface CardInput {
   dueDate?: string | null
   /** Estimated effort in man-days. */
   estimateDays?: number | null
+  /** The R4C number; empty clears it. */
+  r4cNo?: string
+  /** The DD number; empty clears it. */
+  ddNo?: string
   /** Label ids or names; unknown names become new labels. */
   labels?: string[]
   checklist?: { text: string; done: boolean }[]
@@ -372,6 +388,8 @@ export function cardInput(value: unknown, isNew: boolean): CardInput {
     startDate: optional(c.startDate, (v) => (v === null || v === '' ? null : date(v, 'startDate'))),
     dueDate: optional(c.dueDate, (v) => (v === null || v === '' ? null : date(v, 'dueDate'))),
     estimateDays: optional(c.estimateDays, (v) => estimate(v, 'estimateDays')),
+    r4cNo: optional(c.r4cNo, (v) => (v === null ? '' : refNo(v, 'r4cNo'))),
+    ddNo: optional(c.ddNo, (v) => (v === null ? '' : refNo(v, 'ddNo'))),
     labels: optional(c.labels, (v) => arr(v, 'labels', 200).map((l) => title(l, 'label', 100))),
     checklist: optional(c.checklist, (v) =>
       arr(v, 'checklist', 500).map((item) => {

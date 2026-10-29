@@ -54,6 +54,11 @@ const estimateDays = {
   description:
     'Estimated effort in man-days (MD), e.g. 3 or 0.5; null clears it. For cards not labelled R4C or Project, the due date is worked out from the start date and this (weekdays only), and the start date is set to today when the card moves into an in-progress column.',
 }
+const refNo = (name: string) => ({
+  type: ['string', 'null'],
+  maxLength: 100,
+  description: `The ${name} number the work belongs to; null or "" clears it. Used on boards that are not Project boards.`,
+})
 const labels = {
   type: 'array',
   items: { type: 'string' },
@@ -111,6 +116,8 @@ const cardFields = {
   startDate,
   dueDate,
   estimateDays,
+  r4cNo: refNo('R4C'),
+  ddNo: refNo('DD'),
   labels,
   checklist,
   progress,
@@ -210,7 +217,7 @@ export const tools: Tool[] = [
       column: text('Only this column (id or title).'),
       label: text('Only cards with this label (name or id).'),
       priority,
-      search: text('Text in the title, notes, checklist, progress updates or interface spec.'),
+      search: text('Text in the title, notes, checklist, progress updates, interface spec, R4C or DD number.'),
       dueFrom: text('Due on or after this date, YYYY-MM-DD.'),
       dueTo: text('Due on or before this date, YYYY-MM-DD. Use today for overdue and due today.'),
       assignee: text('Only cards assigned to this team member (name or id), or "none" for unassigned cards.'),

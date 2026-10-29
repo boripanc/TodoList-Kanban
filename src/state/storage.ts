@@ -12,7 +12,7 @@ export function isAppState(value: unknown): value is AppState {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
   return (
-    (v.version === 1 || v.version === 2 || v.version === 3 || v.version === 4 || v.version === 5 || v.version === 6 || v.version === 7) &&
+    (v.version === 1 || v.version === 2 || v.version === 3 || v.version === 4 || v.version === 5 || v.version === 6 || v.version === 7 || v.version === 8) &&
     Array.isArray(v.boardOrder) &&
     typeof v.boards === 'object' &&
     v.boards !== null &&
@@ -28,7 +28,8 @@ export function isAppState(value: unknown): value is AppState {
  * progress; boards before version 3 had no team and cards no assignees;
  * cards before version 4 had no start date, and before version 5 no estimate,
  * and before version 6 no interface spec. Specs before version 7 had source
- * and target message fields, whose text now lives in the notes.
+ * and target message fields, whose text now lives in the notes. Cards before
+ * version 8 had no R4C or DD number.
  */
 export function migrateState(state: AppState): AppState {
   const cards: AppState['cards'] = {}
@@ -38,6 +39,8 @@ export function migrateState(state: AppState): AppState {
       assigneeIds: card.assigneeIds ?? [],
       startDate: card.startDate ?? null,
       estimateDays: card.estimateDays ?? null,
+      r4cNo: card.r4cNo ?? '',
+      ddNo: card.ddNo ?? '',
       progress: card.progress ?? null,
       progressLog: card.progressLog ?? [],
       spec: card.spec ? withoutMessageFields(card.spec) : null,
@@ -45,7 +48,7 @@ export function migrateState(state: AppState): AppState {
   }
   const boards: AppState['boards'] = {}
   for (const [id, board] of Object.entries(state.boards)) boards[id] = { ...board, team: board.team ?? [] }
-  return { ...state, version: 7, boards, cards }
+  return { ...state, version: 8, boards, cards }
 }
 
 export function loadState(storage: Storage | undefined = globalThis.localStorage): AppState {

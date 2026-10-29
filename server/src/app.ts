@@ -366,8 +366,8 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
       const { rows } = await q.query(
         `insert into kanban.cards (id, board_id, column_id, position, title, description, label_ids, priority,
            due_date, checklist, created_at, updated_at, progress, progress_log, assignee_ids, start_date,
-           estimate_days, spec)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $16, $18, $20, $22)
+           estimate_days, spec, r4c_no, dd_no)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $16, $18, $20, $22, $24, $25)
          on conflict (id) do update set column_id = excluded.column_id, position = excluded.position,
            title = excluded.title, description = excluded.description, label_ids = excluded.label_ids,
            priority = excluded.priority, due_date = excluded.due_date, checklist = excluded.checklist,
@@ -382,7 +382,10 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
            -- And estimates.
            estimate_days = case when $21::boolean then excluded.estimate_days else kanban.cards.estimate_days end,
            -- And interface specs.
-           spec = case when $23::boolean then excluded.spec else kanban.cards.spec end
+           spec = case when $23::boolean then excluded.spec else kanban.cards.spec end,
+           -- And R4C and DD numbers.
+           r4c_no = case when $26::boolean then excluded.r4c_no else kanban.cards.r4c_no end,
+           dd_no = case when $26::boolean then excluded.dd_no else kanban.cards.dd_no end
          where kanban.cards.board_id = excluded.board_id
          returning id`,
         [
@@ -409,6 +412,9 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
           card.estimate_days !== undefined,
           card.spec ? JSON.stringify(card.spec) : null,
           card.spec !== undefined,
+          card.r4c_no ?? '',
+          card.dd_no ?? '',
+          card.r4c_no !== undefined && card.dd_no !== undefined,
         ],
       )
       if (!rows[0]) fail(409, 'That card id is already in use')

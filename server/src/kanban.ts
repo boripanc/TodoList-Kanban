@@ -44,6 +44,10 @@ export interface ApiCard {
   dueDate: string | null
   /** Estimated effort in man-days, or null. */
   estimateDays: number | null
+  /** The R4C number; empty when none. */
+  r4cNo: string
+  /** The DD number; empty when none. */
+  ddNo: string
   labels: ApiLabel[]
   /** Team members the card is assigned to. */
   assignees: { id: string; name: string }[]
@@ -175,6 +179,8 @@ function toApiCard(
     startDate: row.start_date ?? null,
     dueDate: row.due_date,
     estimateDays: row.estimate_days ?? null,
+    r4cNo: row.r4c_no ?? '',
+    ddNo: row.dd_no ?? '',
     labels: row.label_ids.flatMap((id) => byId.get(id) ?? []),
     assignees: (row.assignee_ids ?? []).flatMap((id) => {
       const m = people.get(id)
@@ -546,8 +552,8 @@ export async function createCard(
     const now = Date.now()
     await tx.query(
       `insert into kanban.cards (id, board_id, column_id, position, title, description, label_ids, priority, due_date,
-         checklist, created_at, updated_at, progress, assignee_ids, start_date, estimate_days, spec)
-       values ($1, $2, $3, 0, $4, $5, $6, $7, $8, $9, $10, $10, $11, $12, $13, $14, $15)`,
+         checklist, created_at, updated_at, progress, assignee_ids, start_date, estimate_days, spec, r4c_no, dd_no)
+       values ($1, $2, $3, 0, $4, $5, $6, $7, $8, $9, $10, $10, $11, $12, $13, $14, $15, $16, $17)`,
       [
         id,
         boardId,
@@ -564,6 +570,8 @@ export async function createCard(
         dates.startDate,
         dates.estimateDays,
         specJson(applySpecPatch(null, input.spec)),
+        input.r4cNo ?? '',
+        input.ddNo ?? '',
       ],
     )
     await placeCard(tx, boardId, id, column.id, input.position)
@@ -604,7 +612,7 @@ export async function updateCard(
     await tx.query(
       `update kanban.cards set title = $2, description = $3, priority = $4, due_date = $5, label_ids = $6,
          checklist = $7, updated_at = $8, progress = $9, assignee_ids = $10, start_date = $11, estimate_days = $12,
-         spec = $13
+         spec = $13, r4c_no = $14, dd_no = $15
        where id = $1`,
       [
         cardId,
@@ -620,6 +628,8 @@ export async function updateCard(
         startDate,
         estimateDays,
         specJson(applySpecPatch(card.spec ?? null, input.spec)),
+        input.r4cNo ?? card.r4c_no ?? '',
+        input.ddNo ?? card.dd_no ?? '',
       ],
     )
     if (input.column !== undefined || input.position !== undefined) {
@@ -809,7 +819,7 @@ export async function findCards(db: Db, user: User, query: CardQuery): Promise<A
   if (query.dueTo) where.push(`c.due_date <= ${param(query.dueTo)}`)
   if (query.search) {
     const p = param(`%${query.search.replace(/[\\%_]/g, (m) => `\\${m}`)}%`)
-    where.push(`(c.title ilike ${p} or c.description ilike ${p} or c.checklist::text ilike ${p} or c.progress_log::text ilike ${p} or coalesce(c.spec::text, '') ilike ${p})`)
+    where.push(`(c.title ilike ${p} or c.description ilike ${p} or c.checklist::text ilike ${p} or c.progress_log::text ilike ${p} or coalesce(c.spec::text, '') ilike ${p} or c.r4c_no ilike ${p} or c.dd_no ilike ${p})`)
   }
   const { rows } = await db.query<CardDbRow & { column_title: string; labels: ApiLabel[]; team: TeamMember[] }>(
     `select c.*, col.title as column_title, b.labels, b.team

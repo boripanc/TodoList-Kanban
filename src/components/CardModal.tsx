@@ -14,6 +14,7 @@ import { PendingAssignment } from './Assignments'
 import { SpecEditor } from './Interfaces'
 import { CardFiles } from './Attachments'
 import { useCloud } from '../cloud/context'
+import { cleanRef, isProjectBoard, MAX_REF_LENGTH } from '../lib/refs'
 
 const priorities: Priority[] = ['none', 'low', 'medium', 'high', 'urgent']
 
@@ -33,6 +34,10 @@ export function CardModal({
   const [newItem, setNewItem] = useState('')
   const [title, setTitle] = useState(card.title)
   const [description, setDescription] = useState(card.description)
+  const [r4cNo, setR4cNo] = useState(card.r4cNo)
+  const [ddNo, setDdNo] = useState(card.ddNo)
+  // R4C and DD numbers belong to work boards; Project boards track interfaces instead.
+  const showRefs = !isProjectBoard(board, state.columns, state.cards) || !!card.r4cNo || !!card.ddNo
   const column = findColumnOfCard(state, card.id)
   const startRef = useRef<HTMLInputElement>(null)
   const labelNames = board.labels.filter((l) => card.labelIds.includes(l.id)).map((l) => l.name)
@@ -74,6 +79,8 @@ export function CardModal({
     const patch: Partial<Card> = {}
     if (title.trim() && title.trim() !== card.title) patch.title = title
     if (description !== card.description) patch.description = description
+    if (cleanRef(r4cNo) !== card.r4cNo) patch.r4cNo = cleanRef(r4cNo)
+    if (cleanRef(ddNo) !== card.ddNo) patch.ddNo = cleanRef(ddNo)
     if (Object.keys(patch).length > 0) update(patch)
   }
 
@@ -167,6 +174,33 @@ export function CardModal({
           </div>
 
           <aside className="card-editor-side">
+            {showRefs && (
+              <div className="ref-fields">
+                <label className="field">
+                  <span>R4C no.</span>
+                  <input
+                    value={r4cNo}
+                    maxLength={MAX_REF_LENGTH}
+                    placeholder="R4C number"
+                    onChange={(e) => setR4cNo(e.target.value)}
+                    onBlur={commitText}
+                    onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                  />
+                </label>
+                <label className="field">
+                  <span>DD no.</span>
+                  <input
+                    value={ddNo}
+                    maxLength={MAX_REF_LENGTH}
+                    placeholder="DD number"
+                    onChange={(e) => setDdNo(e.target.value)}
+                    onBlur={commitText}
+                    onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+                  />
+                </label>
+              </div>
+            )}
+
             <label className="field">
               <span>Column</span>
               <select

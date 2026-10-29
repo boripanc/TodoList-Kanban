@@ -95,6 +95,10 @@ export interface Card {
   dueDate: string | null
   /** Estimated effort in man-days (MD), or null when not estimated. */
   estimateDays: number | null
+  /** The R4C (request for change) number this work belongs to; empty when none. */
+  r4cNo: string
+  /** The DD number this work belongs to; empty when none. */
+  ddNo: string
   checklist: ChecklistItem[]
   /** How far along the task is, 0-100, or null when not tracked. */
   progress: number | null
@@ -129,7 +133,7 @@ export interface Board {
 }
 
 export interface AppState {
-  version: 7
+  version: 8
   boardOrder: string[]
   activeBoardId: string | null
   boards: Record<string, Board>

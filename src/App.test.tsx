@@ -95,6 +95,49 @@ describe('App', () => {
     expect(within(backlog).getByText('Quarter close')).toBeInTheDocument()
   })
 
+  it('takes R4C and DD numbers on work boards, shows them on the card and edits them', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    const todo = screen.getByRole('region', { name: 'Column: To do' })
+    await user.click(within(todo).getByRole('button', { name: '+ Add card' }))
+    const dialog = screen.getByRole('dialog', { name: 'New card in To do' })
+    await user.type(within(dialog).getByLabelText('New card title'), 'Payroll fix')
+    await user.type(within(dialog).getByLabelText('R4C no.'), 'R4C-1024')
+    await user.type(within(dialog).getByLabelText('DD no.'), 'DD-77')
+    await user.click(within(dialog).getByRole('button', { name: 'Add card' }))
+
+    expect(within(todo).getByText('R4C-1024')).toBeInTheDocument()
+    expect(within(todo).getByText('DD-77')).toBeInTheDocument()
+    await user.click(within(todo).getByText('Payroll fix'))
+    const editor = screen.getByRole('dialog', { name: 'Edit card: Payroll fix' })
+    expect(within(editor).getByLabelText('R4C no.')).toHaveValue('R4C-1024')
+    await user.clear(within(editor).getByLabelText('DD no.'))
+    await user.type(within(editor).getByLabelText('DD no.'), 'DD-78{Enter}')
+    await user.click(within(editor).getByRole('button', { name: 'Close' }))
+    expect(within(todo).getByText('DD-78')).toBeInTheDocument()
+
+    // The search box finds cards by their numbers.
+    await user.type(screen.getByRole('searchbox'), 'DD-78')
+    expect(within(todo).getByText('Payroll fix')).toBeInTheDocument()
+  })
+
+  it('leaves R4C and DD numbers off Project boards', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    await user.click(screen.getByRole('button', { name: '+ New board' }))
+    await user.type(screen.getByPlaceholderText('e.g. Home renovation'), 'Checkout')
+    await user.click(screen.getByRole('radio', { name: /Project/ }))
+    await user.click(screen.getByRole('button', { name: 'Create board' }))
+    const spec = screen.getByRole('region', { name: 'Column: Spec' })
+    await user.click(within(spec).getByRole('button', { name: '+ Add card' }))
+    const dialog = screen.getByRole('dialog', { name: 'New card in Spec' })
+    expect(within(dialog).queryByLabelText('R4C no.')).not.toBeInTheDocument()
+    await user.type(within(dialog).getByLabelText('New card title'), 'Orders to CRM{Enter}')
+    await user.click(within(spec).getByText('Orders to CRM'))
+    const editor = screen.getByRole('dialog', { name: 'Edit card: Orders to CRM' })
+    expect(within(editor).queryByLabelText('DD no.')).not.toBeInTheDocument()
+  })
+
   it('adds an interface card with its spec from the popup', async () => {
     const user = userEvent.setup()
     renderApp()
@@ -494,7 +537,7 @@ describe('storage', () => {
     )
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 1, cards }))
     const state = loadState()
-    expect(state.version).toBe(7)
+    expect(state.version).toBe(8)
     expect(Object.keys(state.cards)).toEqual(Object.keys(saved.cards))
     for (const card of Object.values(state.cards)) expect(card.progressLog).toEqual([])
   })
@@ -507,7 +550,7 @@ describe('storage', () => {
     const boards = Object.fromEntries(Object.entries(saved.boards).map(([id, { team: _t, ...board }]) => [id, board]))
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 2, boards, cards }))
     const state = loadState()
-    expect(state.version).toBe(7)
+    expect(state.version).toBe(8)
     for (const board of Object.values(state.boards)) expect(board.team).toEqual([])
     for (const card of Object.values(state.cards)) expect(card.assigneeIds).toEqual([])
   })
@@ -519,8 +562,19 @@ describe('storage', () => {
     )
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 4, cards }))
     const state = loadState()
-    expect(state.version).toBe(7)
+    expect(state.version).toBe(8)
     for (const card of Object.values(state.cards)) expect(card.estimateDays).toBeNull()
+  })
+
+  it('upgrades cards saved before R4C and DD numbers existed', () => {
+    const saved = createSampleState()
+    const cards = Object.fromEntries(
+      Object.entries(saved.cards).map(([id, { r4cNo: _r, ddNo: _d, ...card }]) => [id, card]),
+    )
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 7, cards }))
+    const state = loadState()
+    expect(state.version).toBe(8)
+    for (const card of Object.values(state.cards)) expect(card).toMatchObject({ r4cNo: '', ddNo: '' })
   })
 
   it('upgrades cards saved before interface specs existed', () => {
@@ -528,7 +582,7 @@ describe('storage', () => {
     const cards = Object.fromEntries(Object.entries(saved.cards).map(([id, { spec: _s, ...card }]) => [id, card]))
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 5, cards }))
     const state = loadState()
-    expect(state.version).toBe(7)
+    expect(state.version).toBe(8)
     for (const card of Object.values(state.cards)) expect(card.spec).toBeNull()
   })
 
@@ -539,7 +593,7 @@ describe('storage', () => {
     const cards = { ...saved.cards, [id]: { ...card, spec: oldSpec } }
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 6, cards }))
     const state = loadState()
-    expect(state.version).toBe(7)
+    expect(state.version).toBe(8)
     expect(state.cards[id].spec).not.toHaveProperty('input')
     expect(state.cards[id].spec?.notes).toBe(
       'OAuth\n\nSource message:\nIDoc ORDERS05\n\nTarget message and mapping:\nMap to SalesOrder',
@@ -551,7 +605,7 @@ describe('storage', () => {
     const cards = Object.fromEntries(Object.entries(saved.cards).map(([id, { startDate: _s, ...card }]) => [id, card]))
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 3, cards }))
     const state = loadState()
-    expect(state.version).toBe(7)
+    expect(state.version).toBe(8)
     for (const card of Object.values(state.cards)) expect(card.startDate).toBeNull()
   })
 })

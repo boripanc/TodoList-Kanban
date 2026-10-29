@@ -54,7 +54,7 @@ const cardFilters = [
   query('column', 'Column id or title'),
   query('label', 'Label name or id'),
   query('priority', 'Priority', priority),
-  query('search', 'Text in the title, notes, checklist, progress updates or interface spec'),
+  query('search', 'Text in the title, notes, checklist, progress updates, interface spec, R4C or DD number'),
   query('dueFrom', 'Due on or after (YYYY-MM-DD)', date),
   query('dueTo', 'Due on or before (YYYY-MM-DD)', date),
   query('assignee', 'Team member name or id, or "none" for unassigned cards'),
@@ -83,6 +83,18 @@ const cardFields = {
     maximum: 999,
     description:
       'Estimated effort in man-days (MD). For cards not labelled R4C or Project, the due date is worked out from the start date and this (weekdays only), and the start date is set to today when the card moves into an in-progress column.',
+  },
+  r4cNo: {
+    type: 'string',
+    nullable: true,
+    maxLength: 100,
+    description: 'The R4C number the work belongs to; null or "" clears it. Used on boards that are not Project boards.',
+  },
+  ddNo: {
+    type: 'string',
+    nullable: true,
+    maxLength: 100,
+    description: 'The DD number the work belongs to; null or "" clears it. Used on boards that are not Project boards.',
   },
   labels: {
     type: 'array',
@@ -465,6 +477,8 @@ export function openApiSpec() {
             startDate: { ...date, nullable: true },
             dueDate: { ...date, nullable: true, description: 'The end date' },
             estimateDays: { type: 'number', nullable: true, description: 'Estimated effort in man-days' },
+            r4cNo: { type: 'string', description: 'The R4C number; empty when none' },
+            ddNo: { type: 'string', description: 'The DD number; empty when none' },
             labels: { type: 'array', items: ref('Label') },
             assignees: {
               type: 'array',

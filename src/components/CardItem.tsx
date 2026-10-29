@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { refText } from '../lib/refs'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Card, Label, TeamMember } from '../types'
@@ -149,6 +150,12 @@ export function CardView({
         </div>
       )}
       <div className="card-title">{card.title}</div>
+      {(card.r4cNo || card.ddNo) && (
+        <div className="card-refs">
+          {card.r4cNo && <span title="R4C number">{refText('R4C', card.r4cNo)}</span>}
+          {card.ddNo && <span title="DD number">{refText('DD', card.ddNo)}</span>}
+        </div>
+      )}
       {card.spec && (card.spec.senderSystem.trim() || card.spec.receiverSystem.trim()) && (
         <div className="card-endpoint">
           {card.spec.senderSystem.trim() || '?'} → {card.spec.receiverSystem.trim() || '?'}

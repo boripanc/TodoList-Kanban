@@ -3,10 +3,11 @@ import { extractBoardDoc, type BoardDoc } from '../cloud/doc'
 import { templateColumns, templateLabels, type BoardTemplate } from './templates'
 import { MAX_ESTIMATE_DAYS, startWorkPatch } from '../lib/schedule'
 import { applySpecPatch, emptySpec } from '../lib/interfaces'
+import { cleanRef } from '../lib/refs'
 
 /** What the new-card dialog can fill in besides the title. */
 export type NewCardDetails = Partial<
-  Pick<Card, 'description' | 'labelIds' | 'assigneeIds' | 'priority' | 'startDate' | 'dueDate' | 'estimateDays' | 'spec'>
+  Pick<Card, 'description' | 'labelIds' | 'assigneeIds' | 'priority' | 'startDate' | 'dueDate' | 'estimateDays' | 'r4cNo' | 'ddNo' | 'spec'>
 >
 
 export type Action =
@@ -70,7 +71,7 @@ export type Action =
   | { type: 'cloud/clear' }
 
 export const initialState: AppState = {
-  version: 7,
+  version: 8,
   boardOrder: [],
   activeBoardId: null,
   boards: {},
@@ -378,6 +379,8 @@ export function reducer(state: AppState, action: Action): AppState {
         startDate: null,
         dueDate: null,
         estimateDays: null,
+        r4cNo: '',
+        ddNo: '',
         checklist: [],
         progress: null,
         progressLog: [],
@@ -398,6 +401,8 @@ export function reducer(state: AppState, action: Action): AppState {
         if (details.startDate) card.startDate = details.startDate
         if (details.dueDate) card.dueDate = details.dueDate
         if (details.estimateDays && details.estimateDays > 0) card.estimateDays = Math.min(details.estimateDays, MAX_ESTIMATE_DAYS)
+        if (details.r4cNo) card.r4cNo = cleanRef(details.r4cNo)
+        if (details.ddNo) card.ddNo = cleanRef(details.ddNo)
         if (details.spec) card.spec = { ...details.spec }
       }
       return {
