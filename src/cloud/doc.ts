@@ -40,6 +40,9 @@ export interface CardRow {
   due_date: string | null
   /** Left out by apps from before estimates existed; the server then keeps what it has. */
   estimate_days?: number | null
+  /** R4C and DD numbers; left out by apps from before they existed, and the server then keeps what it has. */
+  r4c_no?: string
+  dd_no?: string
   checklist: Card['checklist']
   /** Left out by apps from before progress existed; the server then keeps what it has. */
   progress?: Card['progress']
@@ -108,6 +111,8 @@ export function cardRows(doc: BoardDoc): CardRow[] {
           start_date: card.startDate,
           due_date: card.dueDate,
           estimate_days: card.estimateDays,
+          r4c_no: card.r4cNo,
+          dd_no: card.ddNo,
           checklist: card.checklist,
           progress: card.progress,
           progress_log: card.progressLog,
@@ -146,6 +151,8 @@ export function docFromRows(board: BoardRow, columnRowList: ColumnRow[], cardRow
         startDate: c.start_date ?? null,
         dueDate: c.due_date,
         estimateDays: c.estimate_days ?? null,
+        r4cNo: c.r4c_no ?? '',
+        ddNo: c.dd_no ?? '',
         checklist: c.checklist,
         progress: c.progress ?? null,
         progressLog: c.progress_log ?? [],

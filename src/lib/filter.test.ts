@@ -16,6 +16,8 @@ function card(patch: Partial<Card> = {}): Card {
     startDate: null,
     dueDate: null,
     estimateDays: null,
+    r4cNo: '',
+    ddNo: '',
     spec: null,
     checklist: [],
     progress: null,
@@ -85,5 +87,12 @@ describe('dates', () => {
     expect(dueStatus('2026-10-20', now)).toBe('later')
     expect(formatDue('2026-10-07', now)).toBe('Tomorrow')
     expect(formatDue('2026-10-05', now)).toBe('Yesterday')
+  })
+})
+
+describe('R4C and DD numbers', () => {
+  it('finds cards by their numbers', () => {
+    expect(matchesFilter(card({ r4cNo: 'R4C-1024' }), { ...emptyFilter, query: 'r4c-1024' }, now)).toBe(true)
+    expect(matchesFilter(card({ ddNo: '77' }), { ...emptyFilter, query: '77' }, now)).toBe(true)
   })
 })

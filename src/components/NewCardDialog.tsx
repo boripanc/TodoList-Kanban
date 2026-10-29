@@ -5,6 +5,7 @@ import { createId } from '../lib/id'
 import { todayISO } from '../lib/dates'
 import { dueFromEstimate, MAX_ESTIMATE_DAYS, needsDateRange, scheduleProblem } from '../lib/schedule'
 import { emptySpec, messageModes, modeName, specFields } from '../lib/interfaces'
+import { cleanRef, isProjectBoard, MAX_REF_LENGTH } from '../lib/refs'
 import { priorityLabel } from '../lib/priority'
 import { labelColors } from '../state/templates'
 import { Modal } from './Modal'
@@ -15,13 +16,6 @@ import { AdapterSelect } from './Interfaces'
 const priorities: Priority[] = ['none', 'low', 'medium', 'high', 'urgent']
 
 const hint = (key: (typeof specFields)[number]['key']) => specFields.find((f) => f.key === key)!.hint
-
-/** Boards made from the Project template hold interfaces, so new cards there start with a spec. */
-function holdsInterfaces(board: Board, columns: Record<string, Column>, cards: Record<string, { spec: unknown }>) {
-  return board.columnIds.some(
-    (id) => columns[id]?.title.trim().toLowerCase() === 'spec' || columns[id]?.cardIds.some((c) => cards[c]?.spec),
-  )
-}
 
 /** The popup for adding a card to a column, with its details filled in up front. */
 export function NewCardDialog({ board, column, onClose }: { board: Board; column: Column; onClose: () => void }) {
@@ -36,7 +30,11 @@ export function NewCardDialog({ board, column, onClose }: { board: Board; column
   const [startDate, setStartDate] = useState('')
   const [dueDate, setDueDate] = useState('')
   const [dueTouched, setDueTouched] = useState(false)
-  const [withSpec, setWithSpec] = useState(() => holdsInterfaces(board, state.columns, state.cards))
+  // Project boards hold interfaces, so new cards there start with a spec; other boards track R4C and DD numbers.
+  const [projectBoard] = useState(() => isProjectBoard(board, state.columns, state.cards))
+  const [withSpec, setWithSpec] = useState(projectBoard)
+  const [r4cNo, setR4cNo] = useState('')
+  const [ddNo, setDdNo] = useState('')
   const [spec, setSpec] = useState<InterfaceSpec>(() => emptySpec())
   const [tried, setTried] = useState(false)
 
@@ -86,6 +84,8 @@ export function NewCardDialog({ board, column, onClose }: { board: Board; column
         startDate: startDate || null,
         dueDate: due || null,
         estimateDays,
+        r4cNo: projectBoard ? undefined : cleanRef(r4cNo),
+        ddNo: projectBoard ? undefined : cleanRef(ddNo),
         spec: withSpec ? spec : null,
       },
     })
@@ -210,6 +210,29 @@ export function NewCardDialog({ board, column, onClose }: { board: Board; column
           </div>
 
           <aside className="card-editor-side">
+            {!projectBoard && (
+              <div className="ref-fields">
+                <label className="field">
+                  <span>R4C no.</span>
+                  <input
+                    value={r4cNo}
+                    maxLength={MAX_REF_LENGTH}
+                    placeholder="R4C number"
+                    onChange={(e) => setR4cNo(e.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>DD no.</span>
+                  <input
+                    value={ddNo}
+                    maxLength={MAX_REF_LENGTH}
+                    placeholder="DD number"
+                    onChange={(e) => setDdNo(e.target.value)}
+                  />
+                </label>
+              </div>
+            )}
+
             <div className="field">
               <span>Labels</span>
               <div className="label-toggles">

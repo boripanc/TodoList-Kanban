@@ -1757,6 +1757,29 @@ textarea.masked {
 .spec-agreed {
   color: var(--ok);
 }
+.card-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin-top: 2px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* R4C and DD numbers sit side by side in the card dialogs. */
+.ref-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.ref-fields .field,
+.ref-fields input {
+  min-width: 0;
+}
+
 .card-endpoint {
   margin-top: 2px;
   font-family: ui-monospace, monospace;
