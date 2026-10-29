@@ -3,6 +3,7 @@ import { initialState, reducer, type Action } from './reducer'
 import { addBoardAction } from './storage'
 import type { AppState } from '../types'
 import { extractBoardDoc } from '../cloud/doc'
+import { emptySpec } from '../lib/interfaces'
 
 const now = 1_700_000_000_000
 
@@ -112,6 +113,40 @@ describe('cards', () => {
     state = reducer(state, { type: 'card/delete', cardId: 'c1' })
     expect(state.cards.c1).toBeUndefined()
     expect(state.columns[col].cardIds).toEqual([])
+  })
+
+  it('adds a card with the details from the new-card dialog, keeping only this board\'s labels and team', () => {
+    let { state, board } = workBoard()
+    state = reducer(state, { type: 'team/add', boardId: board.id, member: { id: 'ana', name: 'Ana', color: '#000', capacity: 0 } })
+    const bug = board.labels[0].id
+    state = reducer(state, {
+      type: 'card/add',
+      columnId: board.columnIds[0],
+      id: 'c1',
+      title: 'Orders API',
+      now,
+      details: {
+        description: 'From S/4',
+        labelIds: [bug, 'not-on-board'],
+        assigneeIds: ['ana', 'ana', 'stranger'],
+        priority: 'high',
+        startDate: '2026-11-02',
+        dueDate: '2026-11-06',
+        estimateDays: 5000,
+        spec: { ...emptySpec('idoc', 'soap'), senderSystem: 'S/4HANA' },
+      },
+    })
+    expect(state.cards.c1).toMatchObject({
+      title: 'Orders API',
+      description: 'From S/4',
+      labelIds: [bug],
+      assigneeIds: ['ana'],
+      priority: 'high',
+      startDate: '2026-11-02',
+      dueDate: '2026-11-06',
+      estimateDays: 999,
+      spec: { senderSystem: 'S/4HANA', senderAdapter: 'idoc', receiverAdapter: 'soap' },
+    })
   })
 
   it('does not add a card with an empty title', () => {
