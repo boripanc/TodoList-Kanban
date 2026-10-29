@@ -1,8 +1,13 @@
 import type { AppState, Board, Card, Column, AdapterType, InterfaceSpec, Label, Role, TeamMember } from '../types'
 import { extractBoardDoc, type BoardDoc } from '../cloud/doc'
 import { templateColumns, templateLabels, type BoardTemplate } from './templates'
-import { startWorkPatch } from '../lib/schedule'
+import { MAX_ESTIMATE_DAYS, startWorkPatch } from '../lib/schedule'
 import { applySpecPatch, emptySpec } from '../lib/interfaces'
+
+/** What the new-card dialog can fill in besides the title. */
+export type NewCardDetails = Partial<
+  Pick<Card, 'description' | 'labelIds' | 'assigneeIds' | 'priority' | 'startDate' | 'dueDate' | 'estimateDays' | 'spec'>
+>
 
 export type Action =
   | { type: 'board/add'; id: string; title: string; template: BoardTemplate; ids: string[]; now: number }
@@ -23,7 +28,8 @@ export type Action =
   | { type: 'column/delete'; boardId: string; columnId: string }
   | { type: 'column/move'; boardId: string; columnId: string; toIndex: number }
   | { type: 'column/clear'; columnId: string }
-  | { type: 'card/add'; columnId: string; id: string; title: string; now: number }
+  /** Add a card at the bottom of a column, optionally filled in from the new-card dialog. */
+  | { type: 'card/add'; columnId: string; id: string; title: string; now: number; details?: NewCardDetails }
   | { type: 'card/update'; cardId: string; patch: Partial<Omit<Card, 'id' | 'createdAt'>>; now: number }
   /**
    * Change part of a card's interface spec, giving the card one if it has
@@ -378,6 +384,21 @@ export function reducer(state: AppState, action: Action): AppState {
         spec: null,
         createdAt: action.now,
         updatedAt: action.now,
+      }
+      const details = action.details
+      if (details) {
+        const board = Object.values(state.boards).find((b) => b.columnIds.includes(column.id))
+        if (details.description) card.description = details.description
+        if (details.priority) card.priority = details.priority
+        // Only the board's own labels and team members can be put on a card.
+        if (details.labelIds) card.labelIds = details.labelIds.filter((id) => board?.labels.some((l) => l.id === id))
+        if (details.assigneeIds) {
+          card.assigneeIds = [...new Set(details.assigneeIds)].filter((id) => board?.team.some((m) => m.id === id))
+        }
+        if (details.startDate) card.startDate = details.startDate
+        if (details.dueDate) card.dueDate = details.dueDate
+        if (details.estimateDays && details.estimateDays > 0) card.estimateDays = Math.min(details.estimateDays, MAX_ESTIMATE_DAYS)
+        if (details.spec) card.spec = { ...details.spec }
       }
       return {
         ...state,

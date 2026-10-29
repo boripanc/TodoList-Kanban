@@ -36,7 +36,7 @@ const draftsOf = (spec: InterfaceSpec): Drafts =>
   Object.fromEntries(specFields.map((f) => [f.key, spec[f.key]])) as Drafts
 
 /** A CPI adapter picker, grouped like the iFlow editor. */
-function AdapterSelect({
+export function AdapterSelect({
   value,
   onChange,
   label,

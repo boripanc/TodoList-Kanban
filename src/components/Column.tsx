@@ -1,11 +1,12 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Card, Column as ColumnType, Label, TeamMember } from '../types'
 import { useStore } from '../state/context'
-import { createId } from '../lib/id'
 import { CardItem } from './CardItem'
 import { Menu } from './Menu'
+import { NewCardDialog } from './NewCardDialog'
 import { DONE_VISIBLE_LIMIT, isDoneColumn } from '../lib/done'
 
 interface ColumnProps {
@@ -35,10 +36,10 @@ export function Column({
   activeCardId,
   readOnly = false,
 }: ColumnProps) {
-  const { dispatch } = useStore()
+  const { state, dispatch } = useStore()
+  const board = state.boards[boardId]
   const [editingTitle, setEditingTitle] = useState(false)
   const [composing, setComposing] = useState(false)
-  const [draft, setDraft] = useState('')
   const [showOlder, setShowOlder] = useState(false)
 
   // Done columns keep only the last few finished cards in view; moves land at the bottom,
@@ -58,13 +59,6 @@ export function Column({
 
   const overLimit = column.wipLimit > 0 && totalCount > column.wipLimit
   const atLimit = column.wipLimit > 0 && totalCount === column.wipLimit
-
-  const addCard = () => {
-    const title = draft.trim()
-    if (!title) return
-    dispatch({ type: 'card/add', columnId: column.id, id: createId(), title, now: Date.now() })
-    setDraft('')
-  }
 
   const rename = (title: string) => {
     dispatch({ type: 'column/update', columnId: column.id, patch: { title } })
@@ -173,46 +167,15 @@ export function Column({
         </ul>
       </SortableContext>
 
-      {readOnly ? null : composing ? (
-        <div className="composer">
-          <textarea
-            autoFocus
-            rows={2}
-            value={draft}
-            placeholder="Card title"
-            aria-label="New card title"
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                addCard()
-              }
-              if (e.key === 'Escape') {
-                setComposing(false)
-                setDraft('')
-              }
-            }}
-          />
-          <div className="composer-actions">
-            <button className="button primary" onClick={addCard}>
-              Add card
-            </button>
-            <button
-              className="button ghost"
-              onClick={() => {
-                setComposing(false)
-                setDraft('')
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
+      {!readOnly && (
         <button className="add-card" data-add-card onClick={() => setComposing(true)}>
           + Add card
         </button>
       )}
+      {/* In a portal, so the column's layout and drag transform can't clip or shift the dialog. */}
+      {composing &&
+        board &&
+        createPortal(<NewCardDialog board={board} column={column} onClose={() => setComposing(false)} />, document.body)}
     </section>
   )
 }
