@@ -1964,19 +1964,50 @@ textarea.masked {
   font-size: 1.05rem;
   overflow-wrap: anywhere;
 }
-.preview-head .button {
+.preview-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-left: auto;
+}
+.preview-tools .button {
   text-decoration: none;
+}
+.preview-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.preview-zoom .small-button {
+  min-width: 4.2em;
 }
 .preview-body {
   min-height: 200px;
 }
-.preview-pdf {
-  width: 100%;
-  height: 75vh;
-  border: 1px solid var(--border);
+/* Word and PDF pages sit on grey, like a print layout; they keep their own colours in the dark theme. */
+.preview-paged {
+  max-height: 75vh;
+  overflow: auto;
   border-radius: var(--radius);
-  background: var(--surface-2);
+  background: #e8e8e8;
+}
+.preview-word {
+  display: block;
+}
+.pdf-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
+}
+.pdf-page {
+  display: block;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.3);
 }
 .preview-image {
   display: block;
@@ -1994,39 +2025,94 @@ textarea.masked {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.preview-word {
-  max-height: 75vh;
+/* Excel sheets, drawn like Excel: white cells, grey headers, the file's own widths and styles. */
+.xl {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.xl-scroll {
+  max-height: 70vh;
   overflow: auto;
+  border: 1px solid var(--border);
   border-radius: var(--radius);
+  background: #fff;
 }
-/* Word pages keep their own white paper look in both themes; fit them to a phone. */
-.preview-word .docx-wrapper {
-  padding: 16px;
+.xl-empty {
+  padding: 12px;
 }
-.preview-word .docx-wrapper > section.docx {
-  max-width: 100%;
+.xl-sheet {
+  position: relative;
+  width: max-content;
+  color: #000;
+  color-scheme: light;
+  font-family: Calibri, Carlito, Arial, sans-serif;
+  font-size: 11pt;
+}
+.xl-grid {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: #fff;
+}
+.xl-grid td {
+  padding: 0 3px;
+  overflow: visible;
+  white-space: nowrap;
+  line-height: 1.2;
   box-sizing: border-box;
 }
-.preview-tabs {
+.xl-grid th {
+  background: #f3f3f3;
+  color: #444;
+  font-family: Arial, sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  border-right: 1px solid #c8c8c8;
+  border-bottom: 1px solid #c8c8c8;
+  padding: 0 4px;
+}
+.xl-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  text-align: center;
+}
+.xl-grid tbody th {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  text-align: center;
+}
+.xl-grid .xl-corner {
+  left: 0;
+  z-index: 3;
+}
+.xl-image {
+  position: absolute;
+  pointer-events: none;
+}
+.xl-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 8px;
+  gap: 2px;
 }
-.preview-tabs button {
+.xl-tabs button {
   border: 1px solid var(--border);
-  background: var(--surface);
+  border-top: none;
+  background: var(--surface-2);
   color: var(--text);
-  border-radius: var(--radius);
-  padding: 4px 10px;
+  border-radius: 0 0 6px 6px;
+  padding: 4px 12px;
   font: inherit;
   font-size: 0.85rem;
   cursor: pointer;
 }
-.preview-tabs button.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-text);
+.xl-tabs button.active {
+  background: var(--surface);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: inset 0 2px 0 var(--accent);
 }
 .preview-table-wrap {
   max-height: 70vh;
