@@ -9,6 +9,7 @@ import { createApp } from './app.ts'
 import { createPgDb } from './db.ts'
 import { EventHub } from './events.ts'
 import { migrate } from './migrate.ts'
+import { SSO_CALLBACK_PATH, ssoConfigFromEnv } from './sso.ts'
 
 const root = join(import.meta.dirname, '..', '..')
 for (const file of ['.env.local', '.env']) {
@@ -29,6 +30,12 @@ if (!credentialsKey?.trim())
     'CREDENTIALS_KEY is not set: saved credentials are encrypted with a key kept in the database. Set CREDENTIALS_KEY (e.g. `openssl rand -base64 32`) to keep the key apart from the data.',
   )
 
+const sso = ssoConfigFromEnv(process.env)
+if (sso) {
+  const origin = process.env.PUBLIC_URL?.replace(/\/+$/, '') ?? 'https://your-domain'
+  console.log(`SSO sign-in on with ${sso.issuer}. Register this redirect URI there: ${origin}${SSO_CALLBACK_PATH}`)
+}
+
 const db = createPgDb(databaseUrl)
 await migrate(db, console.log)
 const events = new EventHub(db)
@@ -37,7 +44,7 @@ await events.start()
 const server = new Hono()
 server.route(
   '/',
-  createApp({ db, events, secureCookies: process.env.COOKIE_SECURE === 'true', publicUrl: process.env.PUBLIC_URL, credentialsKey }),
+  createApp({ db, events, secureCookies: process.env.COOKIE_SECURE === 'true', publicUrl: process.env.PUBLIC_URL, credentialsKey, sso }),
 )
 
 const dist = join(root, 'dist')

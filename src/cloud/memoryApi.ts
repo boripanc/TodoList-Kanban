@@ -13,6 +13,7 @@ import type {
   CredentialInput,
   CredentialSecrets,
   SentInvite,
+  SsoProvider,
 } from './api'
 import { boardRow, cardRows, columnRows, docFromRows, type BoardRow, type CardRow, type ColumnRow } from './doc'
 
@@ -46,6 +47,8 @@ export class MemoryServer {
   private nextId = 1
 
   passwords = new Map<string, string>()
+  /** The SSO sign-in the server offers; off unless a test sets it. */
+  sso: SsoProvider | null = null
 
   addUser(email: string, password = 'password123'): CloudUser {
     const user = { id: `user-${this.nextId++}`, email }
@@ -146,6 +149,9 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
     },
     async signOut() {
       api.setUser(null)
+    },
+    async ssoProvider() {
+      return server.sso
     },
 
     async listBoards() {

@@ -11,6 +11,7 @@ import type {
   Member,
   ReceivedInvite,
   SentInvite,
+  SsoProvider,
   VaultKeySource,
 } from './api'
 import { boardRow, cardRows, columnRows, docFromRows, type BoardRow, type CardRow, type ColumnRow } from './doc'
@@ -84,6 +85,16 @@ export function createServerApi(base: string): CloudApi {
     async signOut() {
       await call('POST', '/auth/signout')
       setUser(null)
+    },
+    async ssoProvider(): Promise<SsoProvider | null> {
+      try {
+        const { sso } = await call<{ sso?: { name?: unknown } | null }>('GET', '/auth/sso')
+        if (!sso || typeof sso.name !== 'string') return null
+        return { name: sso.name, signInUrl: `${root}/auth/sso/start` }
+      } catch {
+        // An older server without SSO.
+        return null
+      }
     },
 
     listBoards: () => call('GET', '/boards'),

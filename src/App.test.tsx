@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
 import { StoreProvider } from './state/store'
@@ -606,6 +606,22 @@ describe('accounts and sharing', () => {
     expect(await screen.findByRole('main', { name: 'Sign in' })).toBeInTheDocument()
     expect(screen.queryByRole('main', { name: 'Board: Work' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '+ New board' })).not.toBeInTheDocument()
+  })
+
+  it('offers SSO sign-in when the server has it, and shows why it failed', async () => {
+    const server = new MemoryServer()
+    renderWithCloud(server.client(null))
+    await screen.findByRole('main', { name: 'Sign in' })
+    expect(screen.queryByRole('link', { name: /Sign in with/ })).not.toBeInTheDocument()
+    cleanup()
+
+    server.sso = { name: 'Teddy SSO', signInUrl: '/api/auth/sso/start' }
+    window.history.replaceState(null, '', '/?sso_error=Your%20SSO%20account%20email%20is%20not%20verified%20yet.')
+    renderWithCloud(server.client(null))
+    const link = await screen.findByRole('link', { name: 'Sign in with Teddy SSO' })
+    expect(link).toHaveAttribute('href', '/api/auth/sso/start')
+    expect(screen.getByRole('alert')).toHaveTextContent('Your SSO account email is not verified yet.')
+    expect(window.location.search).toBe('')
   })
 
   it('creates an account, signs out and signs back in', async () => {

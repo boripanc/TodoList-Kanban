@@ -9,7 +9,9 @@ export async function hashPassword(password: string): Promise<string> {
   return `scrypt$${salt.toString('base64')}$${hash.toString('base64')}`
 }
 
-export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+/** False for accounts with no password (they sign in with SSO). */
+export async function verifyPassword(password: string, stored: string | null): Promise<boolean> {
+  if (!stored) return false
   const [scheme, salt, hash] = stored.split('$')
   if (scheme !== 'scrypt' || !salt || !hash) return false
   const expected = Buffer.from(hash, 'base64')

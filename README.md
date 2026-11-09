@@ -50,6 +50,7 @@ Accounts need the server running where you host the app; a static site host serv
 How it works:
 
 - **Accounts**: people sign up with an email and a password (at least 8 characters). Passwords are stored as scrypt hashes, and sessions as hashes of a random token in an `HttpOnly` cookie. To reset a forgotten password, run `npm run server:set-password -- someone@example.com 'their new password'`; that also signs them out everywhere.
+- **SSO**: with `SSO_ISSUER` and `SSO_CLIENT_ID` set, the sign-in page also offers **Sign in with SSO** (OpenID Connect, authorization code flow with PKCE S256, state and nonce). At the provider, register the redirect URI `https://your-domain/api/auth/sso/callback` (the server prints it on start when `PUBLIC_URL` is set) with scopes `openid email profile`. The server checks the ID token's signature (RS256 or ES256, keys from the provider's JWKS), issuer, audience, expiry and nonce, and needs a **verified** email: the first SSO sign-in links the account with that email, or creates one, and later sign-ins find it by the provider's user id even if the email changes. Accounts created through SSO have no password; set one with `server:set-password` if they also need email sign-in. The page Claude shows when connecting to MCP offers SSO too.
 - **Roles**: each shared board has one **owner** (invites people, changes roles, removes people, deletes the board), **editors** (change everything on the board) and **viewers** (read only). The server checks every request against these roles.
 - **Invites by email**: the person sees the invitation once they sign in with that address, and can accept or decline. The app does not send an email for it, so let them know.
 - **Invite links**: anyone with the link can join with the link's role after signing in, until the owner turns the link off.
@@ -66,6 +67,10 @@ How it works:
 | `COOKIE_SECURE` | Set to `true` when serving over https, so the session cookie is https-only. |
 | `PUBLIC_URL` | The site's public address, e.g. `https://workstream.teddybiere.info`, used in OAuth discovery for Claude. Optional: by default it comes from the request and proxy headers. |
 | `CREDENTIALS_KEY` | Encrypts saved credentials. Use a long random value, e.g. from `openssl rand -base64 32`, and keep a copy: credentials saved with it can't be opened without it. Without it, the server generates a key and keeps it in the database (secrets are still not stored as plain text, but the key sits next to them). Credentials saved before you set it stay readable. |
+| `SSO_ISSUER` | Turns on **Sign in with SSO** next to email and password, using this OpenID Connect provider, e.g. `https://sso.teddybiere.info`. Needs `SSO_CLIENT_ID` too. |
+| `SSO_CLIENT_ID` | The client ID registered for this app at the SSO provider. |
+| `SSO_CLIENT_SECRET` | The client's secret, if the provider gave one (sent with HTTP Basic). Leave it out for a public client, which then relies on PKCE alone. |
+| `SSO_NAME` | The name on the button, e.g. `Teddy SSO` shows "Sign in with Teddy SSO" (default `SSO`). |
 | `VITE_API_URL` | Where the app looks for the API (default `/api`). Set it only when the server runs on another address; `off` turns accounts off. |
 
 Behind a reverse proxy, forward `/api` to the server and keep the app on the same origin, so the session cookie is sent.
