@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
@@ -349,6 +349,10 @@ describe('App', () => {
   })
 
   it('shows who is busy when on a timeline and a month calendar', async () => {
+    // A Wednesday: on a Monday the sample's overdue card (due yesterday) falls before this week's timeline.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 10, 11, 12))
+    onTestFinished(() => void vi.useRealTimers())
     const user = userEvent.setup()
     renderApp()
     await user.click(screen.getByRole('button', { name: 'Team' }))
