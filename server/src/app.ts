@@ -15,6 +15,7 @@ import * as oauth from './oauth.ts'
 import { openApiSpec } from './openapi.ts'
 import { peopleRoutes } from './people.ts'
 import { restApi } from './rest.ts'
+import { ssoRoutes, type SsoConfig } from './sso.ts'
 import * as v from './validate.ts'
 import { Vault } from './vault.ts'
 
@@ -32,6 +33,8 @@ export interface AppOptions {
   publicUrl?: string
   /** Encrypts saved credentials. Without it, the server generates a key and keeps it in the database. */
   credentialsKey?: string
+  /** Sign-in with an OpenID Connect provider, next to email and password. Off without it. */
+  sso?: SsoConfig
 }
 
 /** Simple in-memory limit on failed sign-ins per email, to slow down password guessing. */
@@ -55,7 +58,7 @@ function createSignInLimiter(maxFailures = 10, windowMs = 15 * 60 * 1000) {
   }
 }
 
-export function createApp({ db, events, secureCookies = false, publicUrl, credentialsKey }: AppOptions) {
+export function createApp({ db, events, secureCookies = false, publicUrl, credentialsKey, sso }: AppOptions) {
   const app = new Hono<Env>().basePath('/api')
   const limiter = createSignInLimiter()
 
@@ -189,11 +192,15 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
     const email = v.email(b.email)
     limiter.check(email)
     const password = typeof b.password === 'string' ? b.password : ''
-    const { rows } = await db.query<User & { password_hash: string }>(
+    const { rows } = await db.query<User & { password_hash: string | null }>(
       'select id, email, password_hash from kanban.users where lower(email) = $1',
       [email],
     )
     const user = rows[0]
+    if (user && !user.password_hash) {
+      limiter.failed(email)
+      fail(401, sso ? `This account signs in with ${sso.name}. Use the button below.` : 'Wrong email or password')
+    }
     if (!user || !(await verifyPassword(password, user.password_hash))) {
       limiter.failed(email)
       fail(401, 'Wrong email or password')
@@ -212,11 +219,14 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
 
   app.get('/auth/me', async (c) => c.json({ user: await currentUser(c) }))
 
+  if (sso) app.route('/auth/sso', ssoRoutes({ db, config: sso, secureCookies, publicUrl, startSession }))
+  else app.get('/auth/sso', (c) => c.json({ sso: null }))
+
   app.get('/v1/openapi.json', (c) => c.json(openApiSpec()))
 
   app.route(
     '/oauth',
-    oauth.oauthRoutes({ db, secureCookies, publicUrl, sessionUser, startSession, signInLimiter: limiter }),
+    oauth.oauthRoutes({ db, secureCookies, publicUrl, sessionUser, startSession, signInLimiter: limiter, ssoName: sso?.name }),
   )
 
   // Everything below needs a signed-in user, an API key or an OAuth access token.

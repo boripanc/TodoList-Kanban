@@ -8,6 +8,14 @@ export interface CloudUser {
   email: string
 }
 
+/** Sign-in with the organisation's SSO (OpenID Connect), next to email and password. */
+export interface SsoProvider {
+  /** Shown on the button: "Sign in with <name>". */
+  name: string
+  /** Where the browser goes to start SSO sign-in; it comes back to the app signed in. */
+  signInUrl: string
+}
+
 export interface Member {
   userId: string
   email: string
@@ -142,6 +150,8 @@ export interface CloudApi {
   /** Create an account and sign in to it. */
   signUp(email: string, password: string): Promise<void>
   signOut(): Promise<void>
+  /** The SSO provider to offer on the sign-in page, or null when SSO sign-in is off. */
+  ssoProvider(): Promise<SsoProvider | null>
 
   listBoards(): Promise<BoardSummary[]>
   /** Null when the board is gone or the user no longer has access. */

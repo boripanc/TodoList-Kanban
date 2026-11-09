@@ -1,10 +1,24 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import type { Board, Role } from '../types'
-import { inviteLink, roleName, type Member, type SentInvite } from '../cloud/api'
+import { inviteLink, roleName, type Member, type SentInvite, type SsoProvider } from '../cloud/api'
 import type { Cloud } from '../cloud/context'
 import { Modal } from './Modal'
 
 type InviteRole = Exclude<Role, 'owner'>
+
+/** A failed SSO sign-in comes back as ?sso_error=...; take it off the address so a reload doesn't show it again. */
+function takeSsoError(): string | null {
+  try {
+    const url = new URL(window.location.href)
+    const message = url.searchParams.get('sso_error')
+    if (message === null) return null
+    url.searchParams.delete('sso_error')
+    window.history.replaceState(null, '', url.toString())
+    return message.slice(0, 300) || 'SSO sign-in failed.'
+  } catch {
+    return null
+  }
+}
 
 /** Shown instead of the app until someone signs in, when accounts are on. */
 export function SignInPage({ cloud }: { cloud: Cloud }) {
@@ -12,8 +26,20 @@ export function SignInPage({ cloud }: { cloud: Cloud }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(takeSsoError)
+  const [sso, setSso] = useState<SsoProvider | null>(null)
   const signingUp = mode === 'sign-up'
+
+  useEffect(() => {
+    let active = true
+    cloud.api.ssoProvider().then(
+      (provider) => active && setSso(provider),
+      () => {},
+    )
+    return () => {
+      active = false
+    }
+  }, [cloud.api])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -84,6 +110,16 @@ export function SignInPage({ cloud }: { cloud: Cloud }) {
             {signingUp ? 'I already have an account' : 'Create an account'}
           </button>
         </div>
+        {sso && (
+          <>
+            <p className="sign-in-or muted" aria-hidden>
+              or
+            </p>
+            <a className="button sso-button" href={sso.signInUrl}>
+              Sign in with {sso.name}
+            </a>
+          </>
+        )}
       </form>
     </main>
   )

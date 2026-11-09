@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Exercises the server API against an in-process Postgres (PGlite): accounts,
 // sharing, roles, invites and live-update notifications.
-import { createHash } from 'node:crypto'
+import { createHash, generateKeyPairSync, sign as cryptoSign, type KeyObject } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { PGlite } from '@electric-sql/pglite'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -1816,5 +1816,286 @@ describe('credentials', () => {
       [a, b],
     )
     expect((await ana.call('GET', `/credentials/${b}/secret`)).status).toBe(409)
+  })
+})
+
+describe('SSO sign-in (OpenID Connect)', () => {
+  const issuer = 'https://sso.example.com'
+  const clientId = 'kanban-app'
+  const clientSecret = 'not-a-real-secret'
+  const rsa = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const ec = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+  const stranger = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const jwks = {
+    keys: [
+      { ...rsa.publicKey.export({ format: 'jwk' }), kid: 'rsa1', use: 'sig', alg: 'RS256' },
+      { ...ec.publicKey.export({ format: 'jwk' }), kid: 'ec1', use: 'sig', alg: 'ES256' },
+    ],
+  }
+
+  type Claims = Record<string, unknown>
+  /** What the fake provider puts in the next ID token and userinfo, and how it signs. */
+  let idp: {
+    claims: (nonce: string) => Claims
+    userinfo?: Claims
+    alg: 'RS256' | 'ES256'
+    key: KeyObject
+    kid: string
+    lastToken?: URLSearchParams
+    lastAuthorization?: string | null
+  }
+  const issued = new Map<string, string>() // code -> nonce
+
+  const sign = (claims: Claims) => {
+    const enc = (x: unknown) => Buffer.from(JSON.stringify(x)).toString('base64url')
+    const data = `${enc({ alg: idp.alg, kid: idp.kid, typ: 'JWT' })}.${enc(claims)}`
+    const signature =
+      idp.alg === 'RS256'
+        ? cryptoSign('sha256', Buffer.from(data), idp.key)
+        : cryptoSign('sha256', Buffer.from(data), { key: idp.key, dsaEncoding: 'ieee-p1363' })
+    return `${data}.${signature.toString('base64url')}`
+  }
+
+  const fakeFetch: typeof fetch = async (input, init) => {
+    const url = new URL(String(input))
+    const json = (data: unknown, status = 200) =>
+      new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } })
+    if (url.href === `${issuer}/.well-known/openid-configuration`)
+      return json({
+        issuer,
+        authorization_endpoint: `${issuer}/auth`,
+        token_endpoint: `${issuer}/token`,
+        jwks_uri: `${issuer}/jwks`,
+        userinfo_endpoint: `${issuer}/me`,
+      })
+    if (url.href === `${issuer}/jwks`) return json(jwks)
+    if (url.href === `${issuer}/token`) {
+      const form = new URLSearchParams(String(init?.body))
+      idp.lastToken = form
+      idp.lastAuthorization = new Headers(init?.headers).get('authorization')
+      const nonce = issued.get(form.get('code') ?? '')
+      if (!nonce) return json({ error: 'invalid_grant' }, 400)
+      return json({ access_token: 'at-1', token_type: 'Bearer', id_token: sign(idp.claims(nonce)) })
+    }
+    if (url.href === `${issuer}/me`) {
+      if (new Headers(init?.headers).get('authorization') !== 'Bearer at-1') return json({ error: 'invalid_token' }, 401)
+      return json(idp.userinfo ?? {})
+    }
+    return json({ error: 'not found' }, 404)
+  }
+
+  const now = () => Math.floor(Date.now() / 1000)
+  const goodClaims =
+    (extra: Claims = {}) =>
+    (nonce: string): Claims => ({
+      iss: issuer,
+      aud: clientId,
+      sub: 'sso-user-1',
+      email: 'Ana@Example.com',
+      email_verified: true,
+      exp: now() + 300,
+      iat: now(),
+      nonce,
+      ...extra,
+    })
+
+  beforeEach(() => {
+    app = createApp({
+      db,
+      events,
+      publicUrl: 'https://kanban.example.com',
+      sso: { issuer, clientId, clientSecret, name: 'Teddy SSO', fetch: fakeFetch },
+    })
+    idp = { claims: goodClaims(), alg: 'RS256', key: rsa.privateKey, kid: 'rsa1' }
+    issued.clear()
+  })
+
+  /** A browser: keeps cookies, doesn't follow redirects. */
+  function browser() {
+    const jar = new Map<string, string>()
+    return async (path: string, init: RequestInit = {}) => {
+      const headers = new Headers(init.headers)
+      if (jar.size) headers.set('cookie', [...jar].map(([k, v]) => `${k}=${v}`).join('; '))
+      const res = await app.request(path, { ...init, headers })
+      for (const cookie of res.headers.getSetCookie()) {
+        const [name, value] = cookie.split(';')[0].split('=')
+        if (value) jar.set(name, value)
+        else jar.delete(name)
+      }
+      return res
+    }
+  }
+
+  /** Starts SSO, "signs in" at the provider and comes back; returns the callback's answer. */
+  async function ssoSignIn(visit = browser(), opts: { returnTo?: string; tamper?: (q: URLSearchParams) => void } = {}) {
+    const start = await visit(`/api/auth/sso/start${opts.returnTo ? `?return=${encodeURIComponent(opts.returnTo)}` : ''}`)
+    expect(start.status).toBe(302)
+    const auth = new URL(start.headers.get('location')!)
+    const code = `code-${issued.size + 1}`
+    issued.set(code, auth.searchParams.get('nonce')!)
+    const back = new URLSearchParams({ code, state: auth.searchParams.get('state')!, iss: issuer })
+    opts.tamper?.(back)
+    const res = await visit(`/api/auth/sso/callback?${back}`)
+    expect(res.status).toBe(302)
+    return { res, auth, visit, location: res.headers.get('location')! }
+  }
+
+  const me = async (visit: ReturnType<typeof browser>) =>
+    ((await (await visit('/api/auth/me')).json()) as { user: { id: string; email: string } | null }).user
+
+  const errorOf = (location: string) => new URL(location, 'https://kanban.example.com').searchParams.get('sso_error')
+
+  it('says whether SSO is on, and names the provider', async () => {
+    expect(await (await app.request('/api/auth/sso')).json()).toEqual({ sso: { name: 'Teddy SSO' } })
+    const off = createApp({ db, events })
+    expect(await (await off.request('/api/auth/sso')).json()).toEqual({ sso: null })
+    expect((await off.request('/api/auth/sso/start')).status).toBe(401)
+  })
+
+  it('sends the browser to the provider with PKCE, state and nonce', async () => {
+    const res = await app.request('/api/auth/sso/start')
+    expect(res.status).toBe(302)
+    const url = new URL(res.headers.get('location')!)
+    expect(url.origin + url.pathname).toBe(`${issuer}/auth`)
+    expect(url.searchParams.get('response_type')).toBe('code')
+    expect(url.searchParams.get('client_id')).toBe(clientId)
+    expect(url.searchParams.get('redirect_uri')).toBe('https://kanban.example.com/api/auth/sso/callback')
+    expect(url.searchParams.get('scope')).toBe('openid email profile')
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256')
+    expect(url.searchParams.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(url.searchParams.get('state')).toBeTruthy()
+    expect(url.searchParams.get('nonce')).toBeTruthy()
+    expect(res.headers.get('set-cookie')).toMatch(/kanban_sso=.*HttpOnly/i)
+  })
+
+  it('creates an account on first SSO sign-in and finds it again by subject', async () => {
+    const { location, auth, visit } = await ssoSignIn()
+    expect(location).toBe('/')
+    const user = await me(visit)
+    expect(user?.email).toBe('ana@example.com')
+
+    // The server swapped the code with the PKCE verifier and its client secret.
+    const verifier = idp.lastToken!.get('code_verifier')!
+    expect(createHash('sha256').update(verifier).digest('base64url')).toBe(auth.searchParams.get('code_challenge'))
+    expect(idp.lastToken!.get('redirect_uri')).toBe('https://kanban.example.com/api/auth/sso/callback')
+    expect(idp.lastAuthorization).toBe(`Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`)
+
+    // The email changed at the provider: still the same account.
+    idp.claims = goodClaims({ email: 'ana.new@example.com' })
+    const again = await ssoSignIn()
+    expect((await me(again.visit))?.id).toBe(user!.id)
+
+    // It has no password, so password sign-in points to SSO.
+    const res = await app.request('/api/auth/signin', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'ana@example.com', password: 'anything at all' }),
+    })
+    expect(res.status).toBe(401)
+    expect(((await res.json()) as { error: string }).error).toContain('signs in with Teddy SSO')
+  })
+
+  it('links an existing password account by verified email', async () => {
+    const { user } = await signUp('ana@example.com')
+    const { visit } = await ssoSignIn()
+    expect((await me(visit))?.id).toBe(user.id)
+  })
+
+  it('reads the email from userinfo when the ID token has none, and accepts ES256', async () => {
+    idp = { ...idp, alg: 'ES256', key: ec.privateKey, kid: 'ec1' }
+    idp.claims = goodClaims({ email: undefined, email_verified: undefined })
+    idp.userinfo = { sub: 'sso-user-1', email: 'bo@example.com', email_verified: true }
+    const { visit, location } = await ssoSignIn()
+    expect(location).toBe('/')
+    expect((await me(visit))?.email).toBe('bo@example.com')
+  })
+
+  it('refuses an email that is not verified, and never links it', async () => {
+    const { user } = await signUp('ana@example.com')
+    idp.claims = goodClaims({ email_verified: false })
+    const { location, visit } = await ssoSignIn()
+    expect(errorOf(location)).toContain('not verified')
+    expect(await me(visit)).toBeNull()
+    const { rows } = await db.query('select * from kanban.user_identities where user_id = $1', [user.id])
+    expect(rows).toHaveLength(0)
+  })
+
+  it.each([
+    ['a token signed with another key', () => (idp.key = stranger.privateKey), 'signature'],
+    ['a token for another app', () => (idp.claims = goodClaims({ aud: 'someone-else' })), 'another app'],
+    ['a token from another issuer', () => (idp.claims = goodClaims({ iss: 'https://evil.example.com' })), 'another issuer'],
+    ['an expired token', () => (idp.claims = goodClaims({ exp: now() - 3600 })), 'expired'],
+    ['a token from another sign-in', () => (idp.claims = goodClaims({ nonce: 'other' })), 'does not match'],
+    ['an unpublished key', () => (idp.kid = 'unknown'), 'does not publish'],
+  ])('refuses %s', async (_name, setup, message) => {
+    setup()
+    const { location, visit } = await ssoSignIn()
+    expect(errorOf(location)).toContain(message)
+    expect(await me(visit)).toBeNull()
+  })
+
+  it('refuses a callback whose state does not match, or that names another issuer', async () => {
+    const wrongState = await ssoSignIn(browser(), { tamper: (q) => q.set('state', 'forged') })
+    expect(errorOf(wrongState.location)).toContain('expired')
+    expect(idp.lastToken).toBeUndefined()
+
+    const wrongIss = await ssoSignIn(browser(), { tamper: (q) => q.set('iss', 'https://evil.example.com') })
+    expect(errorOf(wrongIss.location)).toContain('another sign-in service')
+
+    // A callback without the browser's own flow cookie (e.g. a link someone sent) signs nobody in.
+    const visit = browser()
+    const res = await visit(`/api/auth/sso/callback?code=code-1&state=anything`)
+    expect(errorOf(res.headers.get('location')!)).toContain('expired')
+    expect(await me(visit)).toBeNull()
+  })
+
+  it('reports a cancelled sign-in', async () => {
+    const { location } = await ssoSignIn(browser(), {
+      tamper: (q) => {
+        q.delete('code')
+        q.set('error', 'access_denied')
+      },
+    })
+    expect(errorOf(location)).toBe('SSO sign-in was cancelled.')
+  })
+
+  it('returns only to paths on this site', async () => {
+    expect((await ssoSignIn(browser(), { returnTo: '/?board=1' })).location).toBe('/?board=1')
+    expect((await ssoSignIn(browser(), { returnTo: '//evil.example.com/x' })).location).toBe('/')
+    expect((await ssoSignIn(browser(), { returnTo: 'https://evil.example.com' })).location).toBe('/')
+    expect((await ssoSignIn(browser(), { returnTo: '/\\evil.example.com' })).location).toBe('/')
+  })
+
+  it('offers SSO on the consent page for MCP clients, and comes back to it', async () => {
+    const reg = await app.request('/api/oauth/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        client_name: 'Claude',
+        redirect_uris: ['https://claude.ai/api/mcp/auth_callback'],
+        token_endpoint_auth_method: 'none',
+      }),
+    })
+    const { client_id } = (await reg.json()) as { client_id: string }
+    const query = new URLSearchParams({
+      response_type: 'code',
+      client_id,
+      redirect_uri: 'https://claude.ai/api/mcp/auth_callback',
+      code_challenge: 'c'.repeat(43),
+      code_challenge_method: 'S256',
+      state: 'xyz',
+    })
+    const visit = browser()
+    const html = await (await visit(`/api/oauth/authorize?${query}`)).text()
+    const href = html.match(/href="(\/api\/auth\/sso\/start\?return=[^"]+)"/)?.[1]
+    expect(html).toContain('Sign in with Teddy SSO')
+    const returnTo = new URL(href!.replaceAll('&amp;', '&'), 'https://x').searchParams.get('return')!
+    expect(returnTo.startsWith('/api/oauth/authorize?')).toBe(true)
+
+    const { location } = await ssoSignIn(visit, { returnTo })
+    expect(location).toBe(returnTo)
+    const page = await (await visit(location)).text()
+    expect(page).toContain('Signed in as <strong>ana@example.com</strong>')
+    expect(page).not.toContain('Sign in with Teddy SSO')
   })
 })

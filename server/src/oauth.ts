@@ -30,6 +30,8 @@ export interface OAuthOptions {
   sessionUser: (c: Context) => Promise<User | null>
   startSession: (c: Context, userId: string) => Promise<void>
   signInLimiter: { check(key: string): void; failed(key: string): void; succeeded(key: string): void }
+  /** The SSO provider's name, when SSO sign-in is on: the page then offers it too. */
+  ssoName?: string
 }
 
 /** The address people and clients reach this server at, e.g. https://workstream.example.com. */
@@ -123,6 +125,7 @@ function consentPage(opts: {
   user: User | null
   fields: Record<string, string>
   error?: string
+  ssoName?: string
 }) {
   const hidden = Object.entries(opts.fields)
     .map(([name, value]) => `<input type="hidden" name="${escape(name)}" value="${escape(value)}">`)
@@ -131,6 +134,12 @@ function consentPage(opts: {
     ? `<p>Signed in as <strong>${escape(opts.user.email)}</strong>.</p>`
     : `<label>Email<input type="email" name="email" required autocomplete="email" autofocus></label>
        <label>Password<input type="password" name="password" required autocomplete="current-password"></label>`
+  // SSO signs in and comes back to this page, which then shows Allow.
+  const authorize = `/api/oauth/authorize?${new URLSearchParams(Object.entries(opts.fields).filter(([k]) => k !== 'csrf'))}`
+  const sso =
+    opts.user || !opts.ssoName
+      ? ''
+      : `<p class="muted">or <a href="/api/auth/sso/start?return=${escape(encodeURIComponent(authorize))}">Sign in with ${escape(opts.ssoName)}</a></p>`
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -150,6 +159,7 @@ function consentPage(opts: {
   input[type=email], input[type=password] { font: inherit; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
   .actions { display: flex; gap: 8px; }
   button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; }
+  a { color: var(--accent); }
   button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 </style>
 </head>
@@ -161,6 +171,7 @@ function consentPage(opts: {
   <p class="muted">After this you go back to ${escape(opts.redirectHost)}.</p>
   ${opts.error ? `<p class="error" role="alert">${escape(opts.error)}</p>` : ''}
   ${signIn}
+  ${sso}
   ${hidden}
   <div class="actions">
     <button class="primary" type="submit" name="decision" value="allow">${opts.user ? 'Allow' : 'Sign in and allow'}</button>
@@ -298,6 +309,7 @@ export function oauthRoutes(opts: OAuthOptions) {
         user,
         fields: { ...request.fields, csrf: csrfCookie(c) },
         error,
+        ssoName: opts.ssoName,
       }),
       error ? 400 : 200,
     )
@@ -349,7 +361,7 @@ export function oauthRoutes(opts: OAuthOptions) {
       } catch {
         return render(c, request, null, 'Too many attempts. Try again in a few minutes.')
       }
-      const { rows } = await db.query<User & { password_hash: string }>(
+      const { rows } = await db.query<User & { password_hash: string | null }>(
         'select id, email, password_hash from kanban.users where lower(email) = $1',
         [email],
       )

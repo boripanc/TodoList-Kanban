@@ -1685,6 +1685,26 @@ textarea.masked {
   margin: 0;
   font-size: 1.4rem;
 }
+.sign-in-or {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 0.85rem;
+}
+.sign-in-or::before,
+.sign-in-or::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--border);
+}
+.sso-button {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  color: var(--text);
+  padding: 8px 12px;
+}
 .sign-in-brand {
   margin: 0;
   font-weight: 600;
