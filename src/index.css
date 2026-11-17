@@ -1,59 +1,143 @@
+/*
+ * SAP Fiori look, following the SAP Horizon theme (light) and Horizon Dark.
+ * Token values come from SAP's theming base content (sap_horizon and
+ * sap_horizon_dark css_variables.css); the matching sap* parameter is noted
+ * where it helps to find it again.
+ */
+@font-face {
+  font-family: '72';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./assets/fonts/72/72-Regular-full.woff2') format('woff2');
+}
+@font-face {
+  font-family: '72';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./assets/fonts/72/72-Semibold-full.woff2') format('woff2');
+}
+@font-face {
+  font-family: '72';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./assets/fonts/72/72-Bold-full.woff2') format('woff2');
+}
+
 :root {
-  --bg: #f4f5f7;
-  --surface: #ffffff;
-  --surface-2: #ebecf0;
-  --column: #e9eaee;
-  --border: #d5d7de;
-  --text: #1c2024;
-  --muted: #60646c;
-  --accent: #0d74ce;
+  --bg: #f5f6f7; /* sapBackgroundColor */
+  --shell: #ffffff; /* sapShellColor */
+  --shell-shadow: 0 0.125rem 0.125rem 0 rgb(34 53 72 / 0.15), inset 0 -0.0625rem 0 0 rgb(34 53 72 / 0.2);
+  --surface: #ffffff; /* sapTile_Background, sapGroup_ContentBackground */
+  --surface-2: #eaecee; /* sapList_Hover_Background, sapButton_Hover_Background */
+  --column: #eaecee;
+  --border: #d9d9d9; /* sapShell_BorderColor */
+  --button-border: #bcc3ca; /* sapButton_BorderColor */
+  --field-bg: #ffffff; /* sapField_Background */
+  --field-border: #556b81; /* sapField_BorderColor */
+  --field-shadow: inset 0 0 0 0.0625rem rgb(85 107 129 / 0.25); /* sapField_Shadow */
+  --text: #131e29; /* sapTextColor */
+  --muted: #556b82; /* sapContent_LabelColor */
+  --accent: #0064d9; /* sapButton_TextColor, sapLinkColor */
+  --accent-fill: #0070f2; /* sapButton_Emphasized_Background */
+  --accent-fill-hover: #0064d9;
   --accent-text: #ffffff;
-  --danger: #ce2c31;
-  --warn: #ab6400;
-  --ok: #218358;
-  --shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 1px 1px rgb(0 0 0 / 0.04);
-  --shadow-lg: 0 12px 32px rgb(0 0 0 / 0.2);
-  --radius: 8px;
+  --selected: #ebf8ff; /* sapList_SelectionBackgroundColor */
+  --focus: #0032a5; /* sapContent_FocusColor */
+  --danger: #aa0808; /* sapNegativeColor */
+  --danger-fill: #d20a0a;
+  --warn: #b44f00; /* sapCriticalTextColor */
+  --warn-fill: #e76500; /* sapCriticalElementColor */
+  --ok: #256f3a; /* sapPositiveColor */
+  --on-fill: #ffffff;
+  --avatar-bg: #d1efff; /* sapAvatar_6_Background */
+  --avatar-text: #00168b;
+  --scrim: rgb(0 0 0 / 0.3);
+  --shadow: 0 0 0.125rem 0 rgb(34 53 72 / 0.2), 0 0.125rem 0.25rem 0 rgb(34 53 72 / 0.2); /* sapContent_Shadow0 */
+  --shadow-hover: 0 0 0 0.0625rem rgb(34 53 72 / 0.48), 0 0.125rem 0.5rem 0 rgb(34 53 72 / 0.3); /* Shadow1 */
+  --shadow-lg: 0 0 0 0.0625rem rgb(34 53 72 / 0.48), 0 0.625rem 1.875rem 0 rgb(34 53 72 / 0.25); /* Shadow2 */
+  --radius: 12px; /* cards */
+  --radius-lg: 16px; /* sapTile_BorderCornerRadius */
+  --radius-button: 8px; /* sapButton_BorderCornerRadius */
+  --radius-field: 4px; /* sapField_BorderCornerRadius */
   color-scheme: light;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  font-size: 15px;
+  font-family: '72', '72full', Arial, Helvetica, sans-serif;
+  font-size: 14px; /* sapFontSize */
   line-height: 1.4;
   color: var(--text);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #111113;
-    --surface: #212225;
-    --surface-2: #2b2c30;
-    --column: #18191b;
-    --border: #3a3b40;
-    --text: #edeef0;
-    --muted: #a0a2a9;
-    --accent: #3b9eff;
-    --accent-text: #0b0b0c;
-    --danger: #ff6369;
-    --warn: #ffca16;
-    --ok: #3dd68c;
-    --shadow: 0 1px 2px rgb(0 0 0 / 0.5);
+    --bg: #12171c;
+    --shell: #1d232a;
+    --shell-shadow: 0 0.125rem 0.125rem 0 rgb(0 0 0 / 0.8), inset 0 -0.0625rem 0 0 rgb(255 255 255 / 0.2);
+    --surface: #1d232a;
+    --surface-2: #222b35;
+    --column: #161c22;
+    --border: #2e3742;
+    --button-border: #3a4a5a;
+    --field-bg: #161c22;
+    --field-border: #a9b4be;
+    --field-shadow: inset 0 0 0 0.0625rem rgb(169 180 190 / 0.25);
+    --text: #f5f6f7;
+    --muted: #8396a8;
+    --accent: #4db1ff;
+    --accent-fill: #0070f2;
+    --accent-fill-hover: #0064d9;
+    --accent-text: #ffffff;
+    --selected: #1d2d3e;
+    --focus: #9ad3ff;
+    --danger: #fa6161;
+    --danger-fill: #d20a0a;
+    --warn: #ffdf72;
+    --warn-fill: #f7bf00;
+    --ok: #97dd40;
+    --on-fill: #ffffff;
+    --avatar-bg: #0054cc;
+    --avatar-text: #ffffff;
+    --scrim: rgb(0 0 0 / 0.6);
+    --shadow: 0 0 0.0625rem 0 rgb(255 255 255 / 0.35), 0 0.125rem 0.5rem 0 rgb(0 0 0 / 0.3);
+    --shadow-hover: 0 0 0 0.0625rem rgb(255 255 255 / 0.35), 0 0.125rem 0.5rem 0 rgb(0 0 0 / 0.6);
+    --shadow-lg: 0 0 0 0.0625rem rgb(255 255 255 / 0.35), 0 0.625rem 1.875rem 0 rgb(0 0 0 / 0.6);
     color-scheme: dark;
   }
 }
 
 :root[data-theme='dark'] {
-  --bg: #111113;
-  --surface: #212225;
-  --surface-2: #2b2c30;
-  --column: #18191b;
-  --border: #3a3b40;
-  --text: #edeef0;
-  --muted: #a0a2a9;
-  --accent: #3b9eff;
-  --accent-text: #0b0b0c;
-  --danger: #ff6369;
-  --warn: #ffca16;
-  --ok: #3dd68c;
-  --shadow: 0 1px 2px rgb(0 0 0 / 0.5);
+  --bg: #12171c;
+  --shell: #1d232a;
+  --shell-shadow: 0 0.125rem 0.125rem 0 rgb(0 0 0 / 0.8), inset 0 -0.0625rem 0 0 rgb(255 255 255 / 0.2);
+  --surface: #1d232a;
+  --surface-2: #222b35;
+  --column: #161c22;
+  --border: #2e3742;
+  --button-border: #3a4a5a;
+  --field-bg: #161c22;
+  --field-border: #a9b4be;
+  --field-shadow: inset 0 0 0 0.0625rem rgb(169 180 190 / 0.25);
+  --text: #f5f6f7;
+  --muted: #8396a8;
+  --accent: #4db1ff;
+  --accent-fill: #0070f2;
+  --accent-fill-hover: #0064d9;
+  --accent-text: #ffffff;
+  --selected: #1d2d3e;
+  --focus: #9ad3ff;
+  --danger: #fa6161;
+  --danger-fill: #d20a0a;
+  --warn: #ffdf72;
+  --warn-fill: #f7bf00;
+  --ok: #97dd40;
+  --on-fill: #ffffff;
+  --avatar-bg: #0054cc;
+  --avatar-text: #ffffff;
+  --scrim: rgb(0 0 0 / 0.6);
+  --shadow: 0 0 0.0625rem 0 rgb(255 255 255 / 0.35), 0 0.125rem 0.5rem 0 rgb(0 0 0 / 0.3);
+  --shadow-hover: 0 0 0 0.0625rem rgb(255 255 255 / 0.35), 0 0.125rem 0.5rem 0 rgb(0 0 0 / 0.6);
+  --shadow-lg: 0 0 0 0.0625rem rgb(255 255 255 / 0.35), 0 0.625rem 1.875rem 0 rgb(0 0 0 / 0.6);
   color-scheme: dark;
 }
 
@@ -75,23 +159,46 @@ textarea {
   color: inherit;
 }
 
+/* Input fields (sap.m.Input): 2.25rem tall, darker border, faint inner shadow */
 input,
 select,
 textarea {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 8px;
+  background: var(--field-bg);
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-field);
+  box-shadow: var(--field-shadow);
+  padding: 6px 10px;
   min-width: 0;
+}
+input:not([type='checkbox'], [type='radio'], [type='range'], [type='color']),
+select {
+  min-height: 36px;
+}
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'] {
+  accent-color: var(--accent-fill);
+  box-shadow: none;
+}
+input:hover:not(:disabled, [type='checkbox'], [type='radio'], [type='range']),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  font-style: italic;
 }
 
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 button:focus-visible,
+a:focus-visible,
 [role='button']:focus-visible,
 .card-slot:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus);
   outline-offset: 1px;
 }
 
@@ -101,7 +208,8 @@ textarea {
 }
 
 h2 {
-  font-size: 1.1rem;
+  font-size: 1.25rem; /* sapFontHeader4Size */
+  font-weight: 700;
   margin: 0 0 12px;
 }
 
@@ -113,12 +221,15 @@ h2 {
   font-size: 0.8rem;
 }
 
-/* Buttons */
+/* Buttons (sap.m.Button): Default, Emphasized (primary), Transparent (ghost), Reject (danger) */
 .button {
-  border: 1px solid var(--border);
+  border: 1px solid var(--button-border);
   background: var(--surface);
-  border-radius: 6px;
+  color: var(--accent);
+  border-radius: var(--radius-button);
+  min-height: 36px;
   padding: 6px 12px;
+  font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -126,40 +237,44 @@ h2 {
   background: var(--surface-2);
 }
 .button:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: default;
 }
 .button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
   color: var(--accent-text);
 }
 .button.primary:hover {
-  filter: brightness(1.08);
+  background: var(--accent-fill-hover);
+  border-color: var(--accent-fill-hover);
 }
 .button.ghost {
   border-color: transparent;
   background: transparent;
 }
+.button.ghost:hover {
+  background: var(--surface-2);
+}
 .button.danger {
   color: var(--danger);
 }
 .button.active {
+  background: var(--selected);
   border-color: var(--accent);
   color: var(--accent);
 }
 .icon-button {
   border: none;
   background: transparent;
-  border-radius: 6px;
-  min-width: 32px;
-  height: 32px;
+  border-radius: var(--radius-button);
+  min-width: 36px;
+  height: 36px;
   cursor: pointer;
-  color: var(--muted);
+  color: var(--accent);
 }
 .icon-button:hover {
   background: var(--surface-2);
-  color: var(--text);
 }
 .icon-button.danger:hover {
   color: var(--danger);
@@ -170,6 +285,9 @@ h2 {
   color: var(--accent);
   cursor: pointer;
   padding: 0;
+  text-decoration: none;
+}
+.link:hover {
   text-decoration: underline;
 }
 
@@ -182,23 +300,43 @@ h2 {
 }
 
 .topbar {
+  /* Shell bar (sap.f.ShellBar, Horizon) */
+  position: relative;
+  z-index: 10;
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 10px 16px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  min-height: 52px;
+  padding: 8px 16px;
+  background: var(--shell);
+  box-shadow: var(--shell-shadow);
 }
 .brand {
-  font-size: 1.4rem;
-  color: var(--accent);
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-button);
+  background: var(--accent-fill);
+  color: var(--accent-text);
+  font-size: 1.15rem;
+  line-height: 1;
 }
 .board-select {
-  font-size: 1.05rem;
-  font-weight: 600;
+  font-size: 1rem; /* sapFontHeader5Size */
+  font-weight: 700;
   margin: 0;
   max-width: 220px;
+}
+select.board-select {
+  border-color: transparent;
+  box-shadow: none;
+  background-color: transparent;
+}
+select.board-select:hover {
+  background-color: var(--surface-2);
+  border-color: transparent;
 }
 .search {
   flex: 1 1 200px;
@@ -215,13 +353,14 @@ h2 {
 }
 
 .filter-bar {
+  /* Filter bar (sap.ui.comp.filterbar), sits under the shell */
   display: flex;
   flex-wrap: wrap;
   gap: 12px 20px;
   align-items: center;
-  padding: 10px 16px;
+  padding: 12px 16px;
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  box-shadow: inset 0 -1px 0 var(--border);
 }
 .filter-group {
   display: flex;
@@ -230,11 +369,8 @@ h2 {
   gap: 6px;
 }
 .filter-heading {
-  font-size: 0.8rem;
-  font-weight: 600;
+  font-size: 0.875rem;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
 }
 .filter-note {
   padding: 6px 16px;
@@ -242,17 +378,24 @@ h2 {
   color: var(--muted);
 }
 .chip {
-  border: 1px solid var(--border);
+  /* Toggle buttons in a filter (sap.m.ToggleButton) */
+  border: 1px solid var(--button-border);
   background: var(--surface);
-  border-radius: 999px;
+  color: var(--accent);
+  border-radius: var(--radius-button);
+  min-height: 28px;
   padding: 2px 10px;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
+  font-weight: 600;
   cursor: pointer;
 }
+.chip:hover {
+  background: var(--surface-2);
+}
 .chip.on {
-  background: var(--accent);
+  background: var(--selected);
   border-color: var(--accent);
-  color: var(--accent-text);
+  color: var(--accent);
 }
 
 /* Board */
@@ -267,12 +410,12 @@ h2 {
 }
 
 .column {
-  flex: 0 0 280px;
+  flex: 0 0 288px;
   max-height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--column);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   padding: 8px;
 }
 .column.is-dragging {
@@ -292,8 +435,8 @@ h2 {
 }
 .column-title {
   flex: 1;
-  font-size: 0.95rem;
-  font-weight: 600;
+  font-size: 1rem;
+  font-weight: 700;
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -304,9 +447,10 @@ h2 {
   font-weight: 600;
 }
 .column-count {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
+  font-weight: 700;
   color: var(--muted);
-  background: var(--surface-2);
+  background: var(--surface);
   border-radius: 999px;
   padding: 1px 8px;
 }
@@ -314,8 +458,8 @@ h2 {
   color: var(--warn);
 }
 .column-count.over-limit {
-  color: #fff;
-  background: var(--danger);
+  color: var(--on-fill);
+  background: var(--danger-fill);
 }
 
 .card-list {
@@ -360,14 +504,16 @@ h2 {
   opacity: 0.35;
 }
 .card {
+  /* Card (sap.f.Card) with a status indicator stripe for priority */
   background: var(--surface);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 8px 10px;
-  border-left: 3px solid transparent;
+  padding: 10px 12px;
+  border-left: 4px solid transparent;
+  transition: box-shadow 0.15s;
 }
 .card:hover {
-  background: color-mix(in srgb, var(--surface) 92%, var(--accent));
+  box-shadow: var(--shadow-hover);
 }
 .card-overlay {
   box-shadow: var(--shadow-lg);
@@ -378,9 +524,10 @@ h2 {
   border-left-color: var(--danger);
 }
 .priority-edge-high {
-  border-left-color: #f76b15;
+  border-left-color: var(--warn-fill);
 }
 .card-title {
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 .card-labels {
@@ -407,7 +554,7 @@ h2 {
 }
 .label-chip.toggle.on {
   background: var(--label);
-  color: #fff;
+  color: var(--on-fill);
   border-color: var(--label);
 }
 .card-meta {
@@ -417,7 +564,9 @@ h2 {
   margin-top: 6px;
 }
 .badge {
+  /* Object status (sap.m.ObjectStatus, inverted) */
   font-size: 0.75rem;
+  font-weight: 600;
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--surface-2);
@@ -433,17 +582,18 @@ h2 {
   color: var(--accent);
 }
 .priority-high {
-  color: #f76b15;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn-fill) 14%, var(--surface));
   font-weight: 600;
 }
 .priority-urgent {
-  color: #fff;
-  background: var(--danger);
+  color: var(--on-fill);
+  background: var(--danger-fill);
   font-weight: 600;
 }
 .due-overdue {
-  color: #fff;
-  background: var(--danger);
+  color: var(--on-fill);
+  background: var(--danger-fill);
 }
 .due-today {
   color: var(--warn);
@@ -486,16 +636,17 @@ input[aria-invalid='true'] {
   margin-top: 8px;
   border: none;
   background: transparent;
-  color: var(--muted);
+  color: var(--accent);
+  font-weight: 600;
   text-align: left;
-  padding: 6px 8px;
-  border-radius: 6px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: var(--radius-button);
   cursor: pointer;
 }
 .add-card:hover,
 .add-column-button:hover {
-  background: var(--surface-2);
-  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
 }
 .add-column {
   flex: 0 0 260px;
@@ -524,14 +675,14 @@ input[aria-invalid='true'] {
   position: relative;
 }
 .menu-list {
+  /* Menu (sap.m.Menu) in a popover */
   position: absolute;
   right: 0;
   top: calc(100% + 4px);
   z-index: 20;
   min-width: 200px;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-button);
   box-shadow: var(--shadow-lg);
   padding: 4px;
   display: flex;
@@ -541,8 +692,9 @@ input[aria-invalid='true'] {
   border: none;
   background: none;
   text-align: left;
-  padding: 7px 10px;
-  border-radius: 4px;
+  min-height: 36px;
+  padding: 7px 12px;
+  border-radius: 6px;
   cursor: pointer;
 }
 .menu-list button:hover {
@@ -557,7 +709,7 @@ input[aria-invalid='true'] {
   position: fixed;
   inset: 0;
   z-index: 50;
-  background: rgb(0 0 0 / 0.45);
+  background: var(--scrim);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -565,11 +717,12 @@ input[aria-invalid='true'] {
   overflow-y: auto;
 }
 .modal {
+  /* Dialog (sap.m.Dialog) */
   position: relative;
   width: 100%;
   max-width: 440px;
   background: var(--surface);
-  border-radius: 12px;
+  border-radius: var(--radius);
   box-shadow: var(--shadow-lg);
   padding: 20px;
 }
@@ -593,20 +746,19 @@ input[aria-invalid='true'] {
 .field > span,
 .field > label,
 .field > legend {
-  font-size: 0.8rem;
-  font-weight: 600;
+  /* Form labels (sap.m.Label) */
+  font-size: 0.875rem;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
   padding: 0;
 }
 
 .card-editor-title {
   width: calc(100% - 40px);
   font-size: 1.25rem;
-  font-weight: 600;
+  font-weight: 700;
   border-color: transparent;
   background: transparent;
+  box-shadow: none;
   margin-bottom: 16px;
 }
 .card-editor-title:hover,
@@ -1223,7 +1375,7 @@ input[aria-invalid='true'] {
   margin-left: -2px;
 }
 .month-day.today .month-date > span:first-child {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: var(--accent-text);
 }
 .month-day.selected {
@@ -1447,9 +1599,9 @@ fieldset.card-editor:disabled .card-editor-title {
   height: 32px;
   border-radius: 999px;
   border: none;
-  background: var(--accent);
-  color: var(--accent-text);
-  font-weight: 600;
+  background: var(--avatar-bg);
+  color: var(--avatar-text);
+  font-weight: 700;
   cursor: pointer;
   position: relative;
 }
