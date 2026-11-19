@@ -117,7 +117,11 @@ describe('cards', () => {
 
   it('adds a card with the details from the new-card dialog, keeping only this board\'s labels and team', () => {
     let { state, board } = workBoard()
-    state = reducer(state, { type: 'team/add', boardId: board.id, member: { id: 'ana', name: 'Ana', color: '#000', capacity: 0 } })
+    state = run(
+      state,
+      { type: 'team/create', id: 't', name: 'Team', cloud: false, boardId: board.id, now },
+      { type: 'member/add', teamId: 't', member: { id: 'ana', name: 'Ana', color: '#000', capacity: 0 } },
+    )
     const bug = board.labels[0].id
     state = reducer(state, {
       type: 'card/add',
@@ -293,7 +297,8 @@ describe('interfaces', () => {
     ])
     state = run(
       state,
-      { type: 'team/add', boardId: board.id, member: { id: 'm1', name: 'Kim', color: '#0090ff', capacity: 0 } },
+      { type: 'team/create', id: 't', name: 'Team', cloud: false, boardId: board.id, now },
+      { type: 'member/add', teamId: 't', member: { id: 'm1', name: 'Kim', color: '#0090ff', capacity: 0 } },
       { type: 'card/addInterface', columnId: board.columnIds[0], id: 'i1', title: ' Create order ', senderAdapter: 'idoc', receiverAdapter: 'http', memberId: 'm1', now },
       { type: 'card/addInterface', columnId: board.columnIds[0], id: 'i2', title: 'Ghost', senderAdapter: 'rfc', receiverAdapter: 'soap', memberId: 'nobody', now },
     )
@@ -372,37 +377,52 @@ describe('team', () => {
   const ana = { id: 'ana', name: 'Ana', color: '#0090ff', capacity: 3 }
   const ben = { id: 'ben', name: 'Ben', color: '#d6409f', capacity: 0 }
 
+  /** The Work board in team "t" with Ana and Ben, and a card "c". */
   function teamBoard() {
     const { state, board } = workBoard()
     return {
       board,
       state: run(
         state,
-        { type: 'team/add', boardId: board.id, member: ana },
-        { type: 'team/add', boardId: board.id, member: ben },
+        { type: 'team/create', id: 't', name: ' Core ', cloud: false, boardId: board.id, now },
+        { type: 'member/add', teamId: 't', member: ana },
+        { type: 'member/add', teamId: 't', member: ben },
         { type: 'card/add', columnId: board.columnIds[0], id: 'c', title: 'Task', now },
       ),
     }
   }
 
-  it('starts a new board and card with nobody on them', () => {
+  it('starts a new board and card with nobody on them, and without a team', () => {
     const { state, board } = workBoard()
     const next = run(state, { type: 'card/add', columnId: board.columnIds[0], id: 'c', title: 'Task', now })
-    expect(next.boards[board.id].team).toEqual([])
+    expect(next.boards[board.id].teamId).toBeNull()
     expect(next.cards.c.assigneeIds).toEqual([])
   })
 
-  it('adds, renames and limits team members, refusing blank names and duplicate ids', () => {
+  it('creates a team with the board in it, renames it and refuses blank names', () => {
     let { state, board } = teamBoard()
-    expect(state.boards[board.id].team.map((m) => m.name)).toEqual(['Ana', 'Ben'])
+    expect(state.boards[board.id].teamId).toBe('t')
+    expect(state.teams.t).toMatchObject({ id: 't', name: 'Core', createdAt: now })
+    expect(state.teams.t).not.toHaveProperty('cloud')
+    expect(reducer(state, { type: 'team/create', id: 'x', name: '  ', cloud: false, now })).toBe(state)
+    expect(reducer(state, { type: 'team/create', id: 't', name: 'Again', cloud: false, now })).toBe(state)
+    state = run(state, { type: 'team/rename', teamId: 't', name: ' Platform ' }, { type: 'team/rename', teamId: 't', name: ' ' })
+    expect(state.teams.t.name).toBe('Platform')
+    const cloud = reducer(state, { type: 'team/create', id: 'a', name: 'Account team', cloud: true, now })
+    expect(cloud.teams.a.cloud).toEqual({ role: 'owner' })
+  })
+
+  it('adds, renames and limits team members, refusing blank names and duplicate ids', () => {
+    let { state } = teamBoard()
+    expect(state.teams.t.members.map((m) => m.name)).toEqual(['Ana', 'Ben'])
     state = run(
       state,
-      { type: 'team/add', boardId: board.id, member: { ...ana, name: 'Again' } },
-      { type: 'team/add', boardId: board.id, member: { ...ana, id: 'x', name: '   ' } },
-      { type: 'team/update', boardId: board.id, memberId: 'ana', patch: { name: '  Ana Lee ', capacity: 4.7 } },
-      { type: 'team/update', boardId: board.id, memberId: 'ben', patch: { name: ' ', capacity: -2 } },
+      { type: 'member/add', teamId: 't', member: { ...ana, name: 'Again' } },
+      { type: 'member/add', teamId: 't', member: { ...ana, id: 'x', name: '   ' } },
+      { type: 'member/update', teamId: 't', memberId: 'ana', patch: { name: '  Ana Lee ', capacity: 4.7 } },
+      { type: 'member/update', teamId: 't', memberId: 'ben', patch: { name: ' ', capacity: -2 } },
     )
-    expect(state.boards[board.id].team).toEqual([
+    expect(state.teams.t.members).toEqual([
       { ...ana, name: 'Ana Lee', capacity: 4 },
       { ...ben, capacity: 0 },
     ])
@@ -423,17 +443,102 @@ describe('team', () => {
     expect(reducer(state, { type: 'card/toggleAssignee', cardId: 'c', memberId: 'zoe', now })).toBe(state)
   })
 
-  it('removes a deleted team member from every card', () => {
+  it('removes a team member from every card on all the team’s boards', () => {
+    let { state, board } = teamBoard()
+    state = run(state, addBoardAction('Ops', 'personal', now))
+    const ops = state.activeBoardId!
+    state = run(
+      state,
+      { type: 'board/setTeam', boardId: ops, teamId: 't' },
+      { type: 'card/add', columnId: state.boards[ops].columnIds[0], id: 'o', title: 'Ops task', now, details: { assigneeIds: ['ana'] } },
+      { type: 'card/update', cardId: 'c', patch: { assigneeIds: ['ana', 'ben'] }, now },
+      { type: 'card/duplicate', cardId: 'c', newId: 'd', now },
+      { type: 'member/remove', teamId: 't', memberId: 'ana' },
+    )
+    expect(state.cards.c.assigneeIds).toEqual(['ben'])
+    expect(state.cards.d.assigneeIds).toEqual(['ben'])
+    expect(state.cards.o.assigneeIds).toEqual([])
+    expect(state.teams.t.members.map((m) => m.id)).toEqual(['ben'])
+    expect(state.boards[board.id].teamId).toBe('t')
+  })
+
+  it('moves a board to another team, bringing along the people its cards are assigned to', () => {
     let { state, board } = teamBoard()
     state = run(
       state,
       { type: 'card/update', cardId: 'c', patch: { assigneeIds: ['ana', 'ben'] }, now },
-      { type: 'card/duplicate', cardId: 'c', newId: 'd', now },
-      { type: 'team/delete', boardId: board.id, memberId: 'ana' },
+      { type: 'team/create', id: 'u', name: 'Other', cloud: false, now },
+      // Ana is on the other team under another id; Ben isn't on it yet.
+      { type: 'member/add', teamId: 'u', member: { id: 'ana2', name: 'ana', color: '#000', capacity: 1 } },
+      { type: 'board/setTeam', boardId: board.id, teamId: 'u' },
     )
-    expect(state.cards.c.assigneeIds).toEqual(['ben'])
-    expect(state.cards.d.assigneeIds).toEqual(['ben'])
-    expect(state.boards[board.id].team.map((m) => m.id)).toEqual(['ben'])
+    expect(state.boards[board.id].teamId).toBe('u')
+    expect(state.cards.c.assigneeIds).toEqual(['ana2', 'ben'])
+    expect(state.teams.u.members.map((m) => m.id)).toEqual(['ana2', 'ben'])
+    // The old team keeps its people.
+    expect(state.teams.t.members.map((m) => m.id)).toEqual(['ana', 'ben'])
+
+    // Out of any team, cards lose their assignees.
+    state = reducer(state, { type: 'board/setTeam', boardId: board.id, teamId: null })
+    expect(state.boards[board.id].teamId).toBeNull()
+    expect(state.cards.c.assigneeIds).toEqual([])
+  })
+
+  it('keeps device boards out of account teams, and the other way round', () => {
+    const { state, board } = teamBoard()
+    const next = run(state, { type: 'team/create', id: 'a', name: 'Account', cloud: true, now })
+    expect(reducer(next, { type: 'board/setTeam', boardId: board.id, teamId: 'a' })).toBe(next)
+    expect(reducer(next, { type: 'board/setTeam', boardId: board.id, teamId: 'missing' })).toBe(next)
+  })
+
+  it('deletes a team, leaving its boards without a team and their cards without assignees', () => {
+    let { state, board } = teamBoard()
+    state = run(
+      state,
+      { type: 'card/update', cardId: 'c', patch: { assigneeIds: ['ana'] }, now },
+      { type: 'team/delete', teamId: 't' },
+    )
+    expect(state.teams.t).toBeUndefined()
+    expect(state.boards[board.id].teamId).toBeNull()
+    expect(state.cards.c.assigneeIds).toEqual([])
+  })
+
+  it('loads account teams in place of the local copies, keeping device teams', () => {
+    const { state } = teamBoard()
+    const members = [ana]
+    let next = run(
+      state,
+      { type: 'team/create', id: 'old', name: 'Gone', cloud: true, now },
+      { type: 'teams/load', teams: [{ id: 'a', name: 'Account', members, createdAt: now, role: 'viewer' }] },
+    )
+    expect(Object.keys(next.teams).sort()).toEqual(['a', 't'])
+    expect(next.teams.a).toEqual({ id: 'a', name: 'Account', members, createdAt: now, cloud: { role: 'viewer' } })
+    // Viewers can't change the team.
+    for (const action of [
+      { type: 'team/rename', teamId: 'a', name: 'Mine' },
+      { type: 'member/add', teamId: 'a', member: ben },
+      { type: 'member/update', teamId: 'a', memberId: 'ana', patch: { capacity: 9 } },
+      { type: 'member/remove', teamId: 'a', memberId: 'ana' },
+      { type: 'team/delete', teamId: 'a' },
+    ] satisfies Action[]) {
+      expect(reducer(next, action)).toBe(next)
+    }
+    // Signing out drops account teams.
+    next = reducer(next, { type: 'cloud/clear' })
+    expect(Object.keys(next.teams)).toEqual(['t'])
+  })
+
+  it('moves a board to the account with an account copy of its team', () => {
+    const { state, board } = teamBoard()
+    const next = run(
+      state,
+      { type: 'team/create', id: 'a', name: 'Core', cloud: true, members: state.teams.t.members, now },
+      { type: 'board/setCloud', boardId: board.id, role: 'owner', teamId: 'a' },
+    )
+    expect(next.boards[board.id].teamId).toBe('a')
+    expect(next.teams.a.members).toEqual(state.teams.t.members)
+    // Without a copy, a board can't keep a team that lives elsewhere.
+    expect(reducer(state, { type: 'board/setCloud', boardId: board.id, role: 'owner' }).boards[board.id].teamId).toBeNull()
   })
 })
 
@@ -476,7 +581,7 @@ describe('shared boards', () => {
       { type: 'card/logProgress', cardId: 'c1', id: 'p1', text: 'Done', progress: 100 },
       { type: 'card/deleteProgress', cardId: 'c1', entryId: 'p1' },
       { type: 'label/delete', boardId: board.id, labelId: board.labels[0].id },
-      { type: 'team/add', boardId: board.id, member: { id: 'm', name: 'Me', color: '#000000', capacity: 0 } },
+      { type: 'board/setTeam', boardId: board.id, teamId: null },
       { type: 'card/toggleAssignee', cardId: 'c1', memberId: 'm' },
     ].map((a) => ({ now, ...a }) as Action)
     for (const action of attempts) expect(reducer(state, action)).toBe(state)

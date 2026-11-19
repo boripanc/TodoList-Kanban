@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AdapterType, Board, Card, InterfaceSpec, MessageMode } from '../types'
 import { useStore } from '../state/context'
+import { boardMembers } from '../lib/teams'
 import { createId } from '../lib/id'
 import { isDoneColumn } from '../lib/done'
 import {
@@ -302,7 +303,8 @@ export function InterfacesDialog({
       return card ? [{ card, column: column.title, done }] : []
     })
   })
-  const list = listInterfaces(board.team, items)
+  const team = boardMembers(state, board)
+  const list = listInterfaces(team, items)
   const target = state.columns[columnId] ? columnId : board.columnIds[0]
 
   const add = (e: React.FormEvent) => {
@@ -343,7 +345,7 @@ export function InterfacesDialog({
           <AdapterSelect label="Receiver adapter" value={receiverAdapter} onChange={setReceiverAdapter} />
           <select value={memberId} onChange={(e) => setMemberId(e.target.value)} aria-label="Built by">
             <option value="">Nobody yet</option>
-            {board.team.map((m) => (
+            {team.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
               </option>
@@ -361,7 +363,7 @@ export function InterfacesDialog({
           </button>
         </form>
       )}
-      {!readOnly && board.team.length === 0 && (
+      {!readOnly && team.length === 0 && (
         <p className="muted small">Add people under Team to give each interface someone who builds it.</p>
       )}
 

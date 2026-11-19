@@ -21,6 +21,10 @@ export interface Cloud {
   /** Move a board from this device to the user's account so it can be shared. */
   moveToAccount: (boardId: string) => void
   deleteBoard: (boardId: string) => void
+  /** Start a team; one in the account (`cloud: true`) is saved there. */
+  createTeam: (action: Extract<Action, { type: 'team/create' }>) => void
+  /** Delete a team, in the account too when it lives there. */
+  deleteTeam: (teamId: string) => void
   leaveBoard: (boardId: string) => Promise<void>
   acceptInvite: (inviteId: string) => Promise<void>
   declineInvite: (inviteId: string) => Promise<void>

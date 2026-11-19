@@ -59,19 +59,69 @@ async function sharedSetup(role: 'editor' | 'viewer' = 'editor') {
 describe('cloud sync', () => {
   it('shares the team and who is assigned to each card', async () => {
     const { ana, ben, board, firstColumn } = await sharedSetup()
+    ana.dispatch({ type: 'team/create', id: 't1', name: 'Core', cloud: true, boardId: board.id, now })
+    ana.sync.publishTeam('t1')
     await ana.edit(
-      { type: 'team/add', boardId: board.id, member: { id: 'm1', name: 'Kim', color: '#0090ff', capacity: 2 } },
+      { type: 'member/add', teamId: 't1', member: { id: 'm1', name: 'Kim', color: '#0090ff', capacity: 2 } },
       { type: 'card/add', columnId: firstColumn, id: 'c1', title: 'Book flights', now },
       { type: 'card/toggleAssignee', cardId: 'c1', memberId: 'm1', now },
     )
-    await ben.sync.refresh(board.id)
-    expect(ben.state.boards[board.id].team).toEqual([{ id: 'm1', name: 'Kim', color: '#0090ff', capacity: 2 }])
+    await ben.sync.refreshAll()
+    expect(ben.state.boards[board.id].teamId).toBe('t1')
+    // Ben edits the board, so he may change its team too.
+    expect(ben.state.teams.t1).toMatchObject({
+      name: 'Core',
+      members: [{ id: 'm1', name: 'Kim', color: '#0090ff', capacity: 2 }],
+      cloud: { role: 'editor' },
+    })
     expect(ben.state.cards.c1.assigneeIds).toEqual(['m1'])
 
-    await ben.edit({ type: 'team/delete', boardId: board.id, memberId: 'm1' })
-    await ana.sync.refresh(board.id)
-    expect(ana.state.boards[board.id].team).toEqual([])
+    await ben.edit({ type: 'member/remove', teamId: 't1', memberId: 'm1' })
+    await ana.sync.refreshAll()
+    expect(ana.state.teams.t1.members).toEqual([])
     expect(ana.state.cards.c1.assigneeIds).toEqual([])
+  })
+
+  it('tells everyone on a team when it changes, and lets only its owner delete it', async () => {
+    const { server, ana, ben, board } = await sharedSetup('viewer')
+    const heard: string[] = []
+    ben.api.subscribe('user-2', { onBoard: () => {}, onMembership: () => {}, onTeam: (id) => heard.push(id) })
+    ana.dispatch({ type: 'team/create', id: 't1', name: 'Core', cloud: true, boardId: board.id, now })
+    ana.sync.publishTeam('t1')
+    await ana.edit({ type: 'member/add', teamId: 't1', member: { id: 'm1', name: 'Kim', color: '#0090ff', capacity: 0 } })
+    // Reloading the board brings along the team it joined.
+    await ben.sync.refresh(board.id)
+    await ben.sync.idle()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(ben.state.teams.t1.cloud).toEqual({ role: 'viewer' })
+    await ana.edit({ type: 'member/update', teamId: 't1', memberId: 'm1', patch: { capacity: 2 } })
+    expect(heard).toContain('t1')
+    await expect(ben.api.saveTeam({ id: 't1', name: 'Mine', members: [], created_at: now })).rejects.toThrow()
+    await expect(ben.api.deleteTeam('t1')).rejects.toThrow()
+
+    ana.sync.deleteTeam('t1')
+    ana.dispatch({ type: 'team/delete', teamId: 't1' })
+    await ana.sync.idle()
+    expect(server.teams.has('t1')).toBe(false)
+    await ben.sync.refreshAll()
+    expect(ben.state.teams.t1).toBeUndefined()
+    expect(ben.state.boards[board.id].teamId).toBeNull()
+  })
+
+  it('refuses to put a board in a team its editor may not change', async () => {
+    const { server, ana, ben, board } = await sharedSetup()
+    // Ben's own team, which Ana has never seen.
+    await ben.api.saveTeam({ id: 'bens', name: 'Ben team', members: [], created_at: now })
+    await expect(
+      ana.api.applyOps(board.id, {
+        board: { title: board.title, labels: board.labels, team_id: 'bens' },
+        upsertColumns: [],
+        deleteColumnIds: [],
+        upsertCards: [],
+        deleteCardIds: [],
+      }),
+    ).rejects.toThrow()
+    expect(server.boards.get(board.id)!.team_id).toBeNull()
   })
 
   it('shares a board: the invitee loads it and both see each other’s edits', async () => {

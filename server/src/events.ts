@@ -1,6 +1,10 @@
 import type { Db } from './db.ts'
 
-export type ServerEvent = { type: 'board'; boardId: string } | { type: 'member'; boardId: string; userId: string }
+export type ServerEvent =
+  | { type: 'board'; boardId: string }
+  | { type: 'member'; boardId: string; userId: string }
+  /** A team changed; when it was deleted, the people who could see it come along. */
+  | { type: 'team'; teamId: string; userIds?: string[]; ownerId?: string }
 
 interface Listener {
   userId: string
@@ -10,7 +14,8 @@ interface Listener {
 /**
  * Fans database change notifications out to connected browsers. A board event
  * goes to that board's members; a membership event goes to the person whose
- * access changed.
+ * access changed; a team event to the team's owner and the members of its
+ * boards.
  */
 export class EventHub {
   private listeners = new Set<Listener>()
@@ -41,6 +46,17 @@ export class EventHub {
     let recipients: Set<string>
     if (event.type === 'member') {
       recipients = new Set([event.userId])
+    } else if (event.type === 'team') {
+      if (event.userIds) {
+        recipients = new Set([...event.userIds, ...(event.ownerId ? [event.ownerId] : [])])
+      } else {
+        const { rows } = await this.db.query<{ user_id: string }>(
+          `select owner_id as user_id from kanban.teams where id = $1
+           union select m.user_id from kanban.board_members m join kanban.boards b on b.id = m.board_id where b.team_id = $1`,
+          [event.teamId],
+        )
+        recipients = new Set(rows.map((r) => r.user_id))
+      }
     } else {
       const { rows } = await this.db.query<{ user_id: string }>(
         'select user_id from kanban.board_members where board_id = $1',

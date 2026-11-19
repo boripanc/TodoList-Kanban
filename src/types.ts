@@ -6,7 +6,7 @@ export interface Label {
   color: string
 }
 
-/** A person cards on a board can be assigned to. */
+/** A person on a team, whom cards on the team's boards can be assigned to. */
 export interface TeamMember {
   id: string
   name: string
@@ -121,18 +121,32 @@ export interface Board {
   title: string
   columnIds: string[]
   labels: Label[]
-  /** People cards on this board can be assigned to. */
-  team: TeamMember[]
+  /** The team the board belongs to (its members are who cards can be assigned to), or null when it has none. */
+  teamId: string | null
   createdAt: number
   /** Set when the board lives in an account (and may be shared); absent for boards kept on this device only. */
   cloud?: { role: Role }
 }
 
+/**
+ * A group of people with the boards they work on. Cards on any of the team's
+ * boards are assigned to its members, so its workload covers all its boards.
+ */
+export interface Team {
+  id: string
+  name: string
+  members: TeamMember[]
+  createdAt: number
+  /** Set when the team lives in an account; absent for teams kept on this device only. */
+  cloud?: { role: Role }
+}
+
 export interface AppState {
-  version: 7
+  version: 9
   boardOrder: string[]
   activeBoardId: string | null
   boards: Record<string, Board>
+  teams: Record<string, Team>
   columns: Record<string, Column>
   cards: Record<string, Card>
 }

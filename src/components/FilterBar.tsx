@@ -1,4 +1,6 @@
 import type { Board, CardFilter, DueFilter, Priority } from '../types'
+import { useStore } from '../state/context'
+import { boardMembers } from '../lib/teams'
 import { emptyFilter, isFilterActive, UNASSIGNED } from '../lib/filter'
 import { Avatar } from './Team'
 import { priorityLabel } from '../lib/priority'
@@ -26,6 +28,7 @@ export function FilterBar({
   filter: CardFilter
   onChange: (filter: CardFilter) => void
 }) {
+  const team = boardMembers(useStore().state, board)
   return (
     <div className="filter-bar" role="group" aria-label="Filters">
       <div className="filter-group">
@@ -43,10 +46,10 @@ export function FilterBar({
           </button>
         ))}
       </div>
-      {board.team.length > 0 && (
+      {team.length > 0 && (
         <div className="filter-group">
           <span className="filter-heading">Assignee</span>
-          {board.team.map((member) => (
+          {team.map((member) => (
             <button
               key={member.id}
               className={`chip chip-person ${filter.assigneeIds.includes(member.id) ? 'on' : ''}`}

@@ -1,5 +1,5 @@
 import { attachmentCategories, attachmentProblem, attachmentTypes, extensionOf } from '../lib/attachments'
-import type { Role } from '../types'
+import type { Role, TeamMember } from '../types'
 import type {
   ApiKey,
   AssignmentRequest,
@@ -15,7 +15,23 @@ import type {
   SentInvite,
   SsoProvider,
 } from './api'
-import { boardRow, cardRows, columnRows, docFromRows, type BoardRow, type CardRow, type ColumnRow } from './doc'
+import {
+  boardRow,
+  cardRows,
+  columnRows,
+  docFromRows,
+  type BoardRow,
+  type CardRow,
+  type ColumnRow,
+  type TeamRow,
+} from './doc'
+
+interface Listener {
+  userId: string
+  onBoard: (id: string) => void
+  onMembership: () => void
+  onTeam: (id: string) => void
+}
 
 interface Invite extends SentInvite {
   boardId: string
@@ -29,6 +45,7 @@ interface Invite extends SentInvite {
 export class MemoryServer {
   users = new Map<string, CloudUser>()
   boards = new Map<string, BoardRow & { updatedAt: string }>()
+  teams = new Map<string, TeamRow & { ownerId: string }>()
   columns = new Map<string, ColumnRow>()
   cards = new Map<string, CardRow>()
   members: { boardId: string; userId: string; role: Role }[] = []
@@ -42,7 +59,7 @@ export class MemoryServer {
   assignmentRequests: (AssignmentRequest & { boardId: string })[] = []
   /** Attached files, with their contents as base64. */
   attachments: (Attachment & { boardId: string; data: string })[] = []
-  private listeners = new Set<{ userId: string; onBoard: (id: string) => void; onMembership: () => void }>()
+  private listeners = new Set<Listener>()
   private clock = 0
   private nextId = 1
 
@@ -66,6 +83,40 @@ export class MemoryServer {
     return this.members.find((m) => m.boardId === boardId && m.userId === userId)?.role
   }
 
+  /** Like the server: the owner, editors of any of the team's boards, or viewers of them. */
+  teamRole(teamId: string, userId: string | undefined): Role | undefined {
+    const team = this.teams.get(teamId)
+    if (!team || !userId) return undefined
+    if (team.ownerId === userId) return 'owner'
+    const roles = [...this.boards.values()]
+      .filter((b) => b.team_id === teamId)
+      .map((b) => this.role(b.id, userId))
+    if (roles.some((r) => r === 'owner' || r === 'editor')) return 'editor'
+    return roles.includes('viewer') ? 'viewer' : undefined
+  }
+
+  /** The members of a board's team. */
+  boardTeam(boardId: string): TeamMember[] {
+    const teamId = this.boards.get(boardId)?.team_id
+    return (teamId && this.teams.get(teamId)?.members) || []
+  }
+
+  /** Like the server: a board with no team gets one, named after it, when someone joins it. */
+  ensureTeam(boardId: string): TeamRow {
+    const board = this.boards.get(boardId)!
+    const existing = board.team_id ? this.teams.get(board.team_id) : undefined
+    if (existing) return existing
+    const ownerId = this.members.find((m) => m.boardId === boardId && m.role === 'owner')!.userId
+    const team = { id: `team-${this.token()}`, name: `${board.title} team`, members: [], created_at: Date.now(), ownerId }
+    this.teams.set(team.id, team)
+    board.team_id = team.id
+    return team
+  }
+
+  touchTeam(teamId: string, extra: string[] = []) {
+    for (const l of this.listeners) if (this.teamRole(teamId, l.userId) || extra.includes(l.userId)) l.onTeam(teamId)
+  }
+
   touch(boardId: string) {
     const board = this.boards.get(boardId)
     if (!board) return
@@ -77,7 +128,7 @@ export class MemoryServer {
     for (const l of this.listeners) if (l.userId === userId) l.onMembership()
   }
 
-  listen(listener: { userId: string; onBoard: (id: string) => void; onMembership: () => void }) {
+  listen(listener: Listener) {
     this.listeners.add(listener)
     return () => void this.listeners.delete(listener)
   }
@@ -91,7 +142,7 @@ export class MemoryServer {
    * assignees and the board owner gets a request (replacing an older one).
    */
   requestAssignment(boardId: string, cardId: string, wanted: string[], requestedBy: string) {
-    const team = this.boards.get(boardId)?.team ?? []
+    const team = this.boardTeam(boardId)
     const assignees = wanted.map((want) => {
       const m = team.find((t) => t.id === want) ?? team.find((t) => t.name.toLowerCase() === want.toLowerCase())
       return m ? { id: m.id, name: m.name } : { id: null, name: want }
@@ -112,6 +163,10 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
   const canEdit = (boardId: string) => {
     const role = server.role(boardId, user?.id)
     if (role !== 'owner' && role !== 'editor') throw new Error('Permission denied')
+  }
+  const canEditTeam = (teamId: string) => {
+    const role = server.teamRole(teamId, user?.id)
+    if (role !== 'owner' && role !== 'editor') throw new Error('Team not found')
   }
   const isOwner = (boardId: string) => {
     if (server.role(boardId, user?.id) !== 'owner') throw new Error('Permission denied')
@@ -170,7 +225,9 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
     async createBoard(doc) {
       const userId = me().id
       if (server.boards.has(doc.board.id)) throw new Error('duplicate key')
-      server.boards.set(doc.board.id, { ...structuredClone(boardRow(doc)), updatedAt: 't0' })
+      const row = structuredClone(boardRow(doc))
+      if (row.team_id) canEditTeam(row.team_id)
+      server.boards.set(doc.board.id, { ...row, team_id: row.team_id ?? null, updatedAt: 't0' })
       server.members.push({ boardId: doc.board.id, userId, role: 'owner' })
       for (const row of columnRows(doc)) server.columns.set(row.id, structuredClone(row))
       for (const row of cardRows(doc)) server.cards.set(row.id, structuredClone(row))
@@ -181,8 +238,9 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
       const board = server.boards.get(boardId)!
       if (ops.board) {
         // Like the server: a board change without a team (from an older app) keeps the team.
-        const { team, ...rest } = structuredClone(ops.board)
-        Object.assign(board, rest, team === undefined ? {} : { team })
+        const { team_id, ...rest } = structuredClone(ops.board)
+        if (team_id !== undefined && team_id !== board.team_id && team_id !== null) canEditTeam(team_id)
+        Object.assign(board, rest, team_id === undefined ? {} : { team_id })
       }
       for (const row of ops.upsertColumns) server.columns.set(row.id, structuredClone(row))
       for (const row of ops.upsertCards) {
@@ -217,6 +275,35 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
       for (const [id, c] of server.columns) if (c.board_id === boardId) server.columns.delete(id)
       for (const [id, c] of server.cards) if (c.board_id === boardId) server.cards.delete(id)
       for (const userId of affected) server.membershipChanged(userId)
+    },
+
+    async listTeams() {
+      const userId = me().id
+      return [...server.teams.values()].flatMap(({ ownerId: _o, ...team }) => {
+        const role = server.teamRole(team.id, userId)
+        return role ? [{ ...structuredClone(team), role }] : []
+      })
+    },
+    async saveTeam(row) {
+      const userId = me().id
+      const existing = server.teams.get(row.id)
+      if (existing) canEditTeam(row.id)
+      if (!row.name.trim()) throw new Error('name is required')
+      const next = { ...structuredClone(row), name: row.name.trim(), ownerId: existing?.ownerId ?? userId }
+      server.teams.set(row.id, existing ? { ...next, created_at: existing.created_at } : next)
+      server.touchTeam(row.id)
+    },
+    async deleteTeam(teamId) {
+      if (server.teamRole(teamId, user?.id) !== 'owner') throw new Error('Only the team owner can delete it')
+      const boards = [...server.boards.values()].filter((b) => b.team_id === teamId)
+      const affected = server.members.filter((m) => boards.some((b) => b.id === m.boardId)).map((m) => m.userId)
+      server.teams.delete(teamId)
+      for (const board of boards) {
+        board.team_id = null
+        for (const card of server.cards.values()) if (card.board_id === board.id) card.assignee_ids = []
+        server.touch(board.id)
+      }
+      server.touchTeam(teamId, [me().id, ...affected])
     },
 
     async listMembers(boardId) {
@@ -312,9 +399,9 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
       isOwner(boardId)
       const request = server.assignmentRequests.find((r) => r.boardId === boardId && r.cardId === cardId)
       const card = server.cards.get(cardId)
-      const board = server.boards.get(boardId)!
       if (!request || !card) throw new Error('No assignment is waiting for that card')
-      const team = [...(board.team ?? [])]
+      const teamRow = server.ensureTeam(boardId)
+      const team = [...teamRow.members]
       const ids = request.assignees.map((p) => {
         const m =
           team.find((t) => t.id === p.id) ?? team.find((t) => t.name.toLowerCase() === p.name.toLowerCase())
@@ -323,7 +410,8 @@ function memoryClient(server: MemoryServer, initial: CloudUser | null) {
         team.push(added)
         return added.id
       })
-      board.team = team
+      teamRow.members = team
+      server.touchTeam(teamRow.id)
       server.cards.set(cardId, { ...card, assignee_ids: ids, updated_at: Date.now() })
       server.assignmentRequests = server.assignmentRequests.filter((r) => r !== request)
       server.touch(boardId)

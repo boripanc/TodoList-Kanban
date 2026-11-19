@@ -6,18 +6,13 @@ import { labelColors } from '../state/templates'
 import { createId } from '../lib/id'
 import { formatDue } from '../lib/dates'
 import { UNASSIGNED } from '../lib/filter'
-import {
-  boardWorkload,
-  initials,
-  loadLevel,
-  mergeWorkloads,
-  type LoadLevel,
-  type MemberLoad,
-} from '../lib/workload'
+import { boardWorkload, initials, loadLevel, teamWorkload, type LoadLevel, type MemberLoad } from '../lib/workload'
+import { boardMembers, canEditTeam, sortedTeams, teamBoardIds, teamOfBoard, teamsForBoard } from '../lib/teams'
 import type { Cloud } from '../cloud/context'
 import { ColorPicker } from './LabelEditor'
 import { Modal } from './Modal'
 import { TeamCalendar, type CalendarView } from './TeamCalendar'
+import { useAddToTeam } from './useAddToTeam'
 
 type Person = Pick<TeamMember, 'name' | 'color'>
 
@@ -71,18 +66,17 @@ const levelText: Record<LoadLevel, string> = {
 export function AssigneePicker({ board, card, readOnly }: { board: Board; card: Card; readOnly: boolean }) {
   const { state, dispatch } = useStore()
   const [name, setName] = useState('')
-  const openByMember = new Map(boardWorkload(state, board.id).members.map((m) => [m.key, m.open.length]))
+  const addToTeam = useAddToTeam(board)
+  const team = boardMembers(state, board)
+  // Open cards across all the team's boards, which is what capacity is about.
+  const workload = board.teamId ? teamWorkload(state, board.teamId) : boardWorkload(state, board.id)
+  const openByMember = new Map(workload.members.map((m) => [m.key, m.open.length]))
 
   const add = (e: React.FormEvent) => {
     e.preventDefault()
     const trimmed = name.trim()
     if (!trimmed) return
-    const existing = board.team.find((m) => m.name.toLowerCase() === trimmed.toLowerCase())
-    const id = existing?.id ?? createId()
-    if (!existing) {
-      const color = labelColors[board.team.length % labelColors.length]
-      dispatch({ type: 'team/add', boardId: board.id, member: { id, name: trimmed, color, capacity: 0 } })
-    }
+    const id = addToTeam(trimmed)
     if (!card.assigneeIds.includes(id)) dispatch({ type: 'card/toggleAssignee', cardId: card.id, memberId: id, now: Date.now() })
     setName('')
   }
@@ -90,9 +84,9 @@ export function AssigneePicker({ board, card, readOnly }: { board: Board; card: 
   return (
     <div className="field">
       <span>Assignees</span>
-      {board.team.length === 0 && <small className="muted">No team yet. Add someone below.</small>}
+      {team.length === 0 && <small className="muted">No team yet. Add someone below.</small>}
       <div className="assignee-toggles">
-        {board.team.map((member) => {
+        {team.map((member) => {
           const on = card.assigneeIds.includes(member.id)
           const open = openByMember.get(member.id) ?? 0
           const full = !on && member.capacity > 0 && open >= member.capacity
@@ -224,7 +218,88 @@ function WorkloadRow({
   )
 }
 
-/** Each team member's open work, and editing the board's team. */
+const NEW_TEAM = '__new'
+
+/** Which team a board belongs to: pick one, leave it without, or start a new one. */
+function BoardTeamPicker({ board, cloud }: { board: Board; cloud: Cloud | null }) {
+  const { state, dispatch } = useStore()
+  const [creating, setCreating] = useState(false)
+  const [name, setName] = useState('')
+  const options = teamsForBoard(state, board)
+  const current = teamOfBoard(state, board)
+  // A board can sit in a team its person can't change (as a viewer); still show it.
+  if (current && !options.includes(current)) options.unshift(current)
+
+  const assignedCards = () =>
+    board.columnIds.flatMap((c) => state.columns[c]?.cardIds ?? []).filter((id) => state.cards[id]?.assigneeIds.length)
+
+  const choose = (value: string) => {
+    if (value === NEW_TEAM) {
+      setCreating(true)
+      return
+    }
+    const teamId = value || null
+    if (teamId === null && assignedCards().length > 0) {
+      const ok = window.confirm('Take this board out of its team? Its cards will lose their assignees.')
+      if (!ok) return
+    }
+    dispatch({ type: 'board/setTeam', boardId: board.id, teamId })
+  }
+
+  const create = (e: React.FormEvent) => {
+    e.preventDefault()
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const action = {
+      type: 'team/create',
+      id: createId(),
+      name: trimmed,
+      cloud: !!board.cloud,
+      boardId: board.id,
+      now: Date.now(),
+    } as const
+    if (cloud && action.cloud) cloud.createTeam(action)
+    else dispatch(action)
+    setCreating(false)
+    setName('')
+  }
+
+  return (
+    <div className="board-team">
+      <label className="board-team-pick">
+        <span>Team of “{board.title}”</span>
+        <select value={creating ? NEW_TEAM : (board.teamId ?? '')} onChange={(e) => choose(e.target.value)}>
+          <option value="">No team</option>
+          {options.map((team) => (
+            <option key={team.id} value={team.id}>
+              {team.name}
+            </option>
+          ))}
+          <option value={NEW_TEAM}>+ New team…</option>
+        </select>
+      </label>
+      {creating && (
+        <form className="team-new" onSubmit={create} aria-label="New team">
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Team name, e.g. Integration team"
+            aria-label="New team name"
+          />
+          <button className="button primary" type="submit" disabled={!name.trim()}>
+            Create team
+          </button>
+          <button type="button" className="button" onClick={() => setCreating(false)}>
+            Cancel
+          </button>
+        </form>
+      )}
+    </div>
+  )
+}
+
+/** A team's workload across all its boards, its boards, and editing the team. */
 export function TeamDialog({
   board,
   readOnly,
@@ -243,19 +318,32 @@ export function TeamDialog({
   onShowOnBoard: (memberId: string) => void
 }) {
   const { state, dispatch } = useStore()
-  const [scope, setScope] = useState<'board' | 'all'>('board')
+  const teams = sortedTeams(state)
+  const [picked, setPicked] = useState<string | null>(null)
+  // The board's own team unless another one was picked; a team that went away falls back to it.
+  const teamId = picked && state.teams[picked] ? picked : board.teamId
+  const team = teamId ? state.teams[teamId] : undefined
+  const isBoardTeam = !!team && team.id === board.teamId
+  const boardIds = team ? teamBoardIds(state, team.id) : []
+  const [scope, setScope] = useState<'team' | 'board'>('team')
   const [view, setView] = useState<'list' | CalendarView>('list')
   const [name, setName] = useState('')
   const [capacity, setCapacity] = useState('')
-  const [color, setColor] = useState(labelColors[board.team.length % labelColors.length])
+  const members = team?.members ?? []
+  const [color, setColor] = useState(labelColors[members.length % labelColors.length])
   const [access, setAccess] = useState<string[]>([])
+  const addToTeam = useAddToTeam(board)
 
-  const boardsWithTeams = state.boardOrder.filter((id) => (state.boards[id]?.team.length ?? 0) > 0)
-  const workload =
-    scope === 'all'
-      ? mergeWorkloads(boardsWithTeams.map((id) => boardWorkload(state, id)))
-      : boardWorkload(state, board.id)
+  const boardScope = isBoardTeam && scope === 'board' && boardIds.length > 1
+  const workload = !team
+    ? boardWorkload(state, board.id)
+    : boardScope
+      ? boardWorkload(state, board.id)
+      : teamWorkload(state, team.id)
   const scale = Math.max(1, ...workload.members.map((m) => m.open.length))
+  const editable = !readOnly && (!team || canEditTeam(team))
+  const deletable = !!team && (!team.cloud || team.cloud.role === 'owner')
+  const showBoard = !boardScope && boardIds.length > 1
 
   // People with access to an account board can be added in one click.
   useEffect(() => {
@@ -263,27 +351,59 @@ export function TeamDialog({
     let cancelled = false
     cloud.api
       .listMembers(board.id)
-      .then((members) => !cancelled && setAccess(members.map((m) => m.email)))
+      .then((list) => !cancelled && setAccess(list.map((m) => m.email)))
       .catch(() => {})
     return () => {
       cancelled = true
     }
   }, [cloud, board.id, board.cloud])
-  const taken = new Set(board.team.map((m) => m.name.toLowerCase()))
-  const suggestions = access.map(nameFromEmail).filter((n) => n && !taken.has(n.toLowerCase()))
+  const taken = new Set(members.map((m) => m.name.toLowerCase()))
+  const suggestions = isBoardTeam || !team ? access.map(nameFromEmail).filter((n) => n && !taken.has(n.toLowerCase())) : []
 
   const addMember = (memberName: string, memberCapacity = 0, memberColor = color) => {
-    dispatch({
-      type: 'team/add',
-      boardId: board.id,
-      member: { id: createId(), name: memberName, color: memberColor, capacity: memberCapacity },
-    })
-    setColor(labelColors[(board.team.length + 1) % labelColors.length])
+    if (team) {
+      dispatch({
+        type: 'member/add',
+        teamId: team.id,
+        member: { id: createId(), name: memberName, color: memberColor, capacity: memberCapacity },
+      })
+    } else {
+      addToTeam(memberName, { capacity: memberCapacity, color: memberColor })
+    }
+    setColor(labelColors[(members.length + 1) % labelColors.length])
   }
 
   return (
     <Modal title="Team and workload" onClose={onClose} wide>
       <h2>Team and workload</h2>
+      {!readOnly && <BoardTeamPicker board={board} cloud={cloud} />}
+
+      {(teams.length > 1 || (teams.length === 1 && !board.teamId)) && (
+        <label className="team-show">
+          <span>Show team</span>
+          <select value={team?.id ?? ''} onChange={(e) => setPicked(e.target.value || null)} aria-label="Show workload of team">
+            {!board.teamId && <option value="">This board (no team)</option>}
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+                {t.id === board.teamId ? ' (this board)' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {team && (
+        <div className="team-boards">
+          <strong>{team.name}</strong>
+          <span className="muted small">
+            {boardIds.length === 0
+              ? 'No boards yet'
+              : `${boardIds.length} board${boardIds.length === 1 ? '' : 's'}: ${boardIds.map((id) => state.boards[id].title).join(', ')}`}
+          </span>
+        </div>
+      )}
+
       <div className="team-views">
         {workload.members.length > 0 && (
           <div className="segmented" role="group" aria-label="View">
@@ -300,27 +420,26 @@ export function TeamDialog({
             ))}
           </div>
         )}
-        {boardsWithTeams.length > 1 && (
+        {isBoardTeam && boardIds.length > 1 && (
           <div className="segmented" role="group" aria-label="Show workload for">
-            <button type="button" className={`chip ${scope === 'board' ? 'on' : ''}`} aria-pressed={scope === 'board'} onClick={() => setScope('board')}>
-              This board
+            <button type="button" className={`chip ${!boardScope ? 'on' : ''}`} aria-pressed={!boardScope} onClick={() => setScope('team')}>
+              All team boards
             </button>
-            <button type="button" className={`chip ${scope === 'all' ? 'on' : ''}`} aria-pressed={scope === 'all'} onClick={() => setScope('all')}>
-              All boards
+            <button type="button" className={`chip ${boardScope ? 'on' : ''}`} aria-pressed={boardScope} onClick={() => setScope('board')}>
+              This board
             </button>
           </div>
         )}
       </div>
-      {scope === 'all' && (
-        <p className="muted small">People with the same name on different boards count as one person.</p>
-      )}
 
       {workload.members.length === 0 ? (
         <p className="muted">
-          No team on this board yet. Add the people you work with, then assign cards to them to see who has what.
+          {team
+            ? 'Nobody on this team yet. Add the people you work with, then assign cards to them to see who has what.'
+            : 'This board has no team yet. Add the people you work with and they become its team. Put your other boards in the same team to see everyone’s work across all of them.'}
         </p>
       ) : view !== 'list' ? (
-        <TeamCalendar view={view} workload={workload} showBoard={scope === 'all'} onOpenCard={onOpenCard} />
+        <TeamCalendar view={view} workload={workload} showBoard={showBoard} onOpenCard={onOpenCard} />
       ) : (
         <ul className="workload">
           {workload.members.map((load) => (
@@ -328,9 +447,9 @@ export function TeamDialog({
               key={load.key}
               load={load}
               scale={scale}
-              showBoard={scope === 'all'}
+              showBoard={showBoard}
               onOpenCard={onOpenCard}
-              onShowOnBoard={scope === 'board' ? () => onShowOnBoard(load.key) : undefined}
+              onShowOnBoard={isBoardTeam || !team ? () => onShowOnBoard(load.key) : undefined}
             />
           ))}
           <li className="workload-row workload-unassigned" aria-label="Workload: Unassigned">
@@ -345,7 +464,7 @@ export function TeamDialog({
                 </small>
               </div>
             </div>
-            {scope === 'board' && workload.unassigned.length > 0 && (
+            {(isBoardTeam || !team) && workload.unassigned.length > 0 && (
               <div className="workload-actions">
                 <button type="button" className="link" onClick={() => onShowOnBoard(UNASSIGNED)}>
                   Filter board
@@ -356,15 +475,45 @@ export function TeamDialog({
         </ul>
       )}
 
-      {scope === 'board' && !readOnly && (
+      {editable && (
         <section className="team-editor" aria-label="Edit team">
           <h3>Edit team</h3>
+          {team && (
+            <div className="team-name-row">
+              <input
+                key={team.id}
+                defaultValue={team.name}
+                aria-label="Team name"
+                onBlur={(e) => {
+                  const next = e.target.value.trim()
+                  if (next && next !== team.name) dispatch({ type: 'team/rename', teamId: team.id, name: next })
+                }}
+              />
+              {deletable && (
+                <button
+                  type="button"
+                  className="button danger"
+                  onClick={() => {
+                    const ok = window.confirm(
+                      `Delete the team "${team.name}"? Its boards stay, without a team, and their cards lose their assignees.`,
+                    )
+                    if (!ok) return
+                    if (cloud) cloud.deleteTeam(team.id)
+                    else dispatch({ type: 'team/delete', teamId: team.id })
+                    setPicked(null)
+                  }}
+                >
+                  Delete team
+                </button>
+              )}
+            </div>
+          )}
           <p className="muted small">
-            Capacity is how many open cards someone can take on at once. Cards in a done column don't count. Leave it
-            at 0 for no limit.
+            Capacity is how many open cards someone can take on at once, across all the team’s boards. Cards in a done
+            column don't count. Leave it at 0 for no limit.
           </p>
           <ul>
-            {board.team.map((member) => (
+            {members.map((member) => (
               <li key={member.id}>
                 <Avatar person={member} />
                 <input
@@ -372,8 +521,8 @@ export function TeamDialog({
                   aria-label={`Name of ${member.name}`}
                   onBlur={(e) => {
                     const next = e.target.value.trim()
-                    if (next && next !== member.name) {
-                      dispatch({ type: 'team/update', boardId: board.id, memberId: member.id, patch: { name: next } })
+                    if (next && next !== member.name && team) {
+                      dispatch({ type: 'member/update', teamId: team.id, memberId: member.id, patch: { name: next } })
                     }
                   }}
                 />
@@ -386,9 +535,10 @@ export function TeamDialog({
                     value={member.capacity}
                     aria-label={`Capacity of ${member.name}`}
                     onChange={(e) =>
+                      team &&
                       dispatch({
-                        type: 'team/update',
-                        boardId: board.id,
+                        type: 'member/update',
+                        teamId: team.id,
                         memberId: member.id,
                         patch: { capacity: Number(e.target.value) || 0 },
                       })
@@ -399,7 +549,7 @@ export function TeamDialog({
                   label={`Color of ${member.name}`}
                   value={member.color}
                   onChange={(next) =>
-                    dispatch({ type: 'team/update', boardId: board.id, memberId: member.id, patch: { color: next } })
+                    team && dispatch({ type: 'member/update', teamId: team.id, memberId: member.id, patch: { color: next } })
                   }
                 />
                 <button
@@ -407,9 +557,10 @@ export function TeamDialog({
                   className="icon-button danger"
                   aria-label={`Remove ${member.name} from the team`}
                   onClick={() => {
-                    if (window.confirm(`Remove ${member.name} from the team? They will be taken off every card.`)) {
-                      dispatch({ type: 'team/delete', boardId: board.id, memberId: member.id })
-                    }
+                    const ok = window.confirm(
+                      `Remove ${member.name} from the team? They will be taken off every card on the team's boards.`,
+                    )
+                    if (ok && team) dispatch({ type: 'member/remove', teamId: team.id, memberId: member.id })
                   }}
                 >
                   🗑

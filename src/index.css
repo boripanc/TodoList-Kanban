@@ -1150,6 +1150,58 @@ input[aria-invalid='true'] {
   margin: 4px 0;
 }
 
+/* Teams: which team a board is in, and whose workload is shown */
+.board-team,
+.team-show {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.board-team-pick,
+.team-show {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+.board-team-pick select,
+.team-show select {
+  min-width: 12em;
+  max-width: 100%;
+}
+.team-new {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 1 1 100%;
+}
+.team-new input {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.team-boards {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 4px 0 10px;
+}
+.team-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.team-name-row input {
+  flex: 1 1 180px;
+  min-width: 0;
+  font-weight: 600;
+}
+
 /* Team calendar: who is busy when */
 .team-views {
   display: flex;

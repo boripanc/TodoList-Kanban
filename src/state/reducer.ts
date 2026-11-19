@@ -1,8 +1,9 @@
-import type { AppState, Board, Card, Column, AdapterType, InterfaceSpec, Label, Role, TeamMember } from '../types'
+import type { AppState, Board, Card, Column, AdapterType, InterfaceSpec, Label, Role, Team, TeamMember } from '../types'
 import { extractBoardDoc, type BoardDoc } from '../cloud/doc'
 import { templateColumns, templateLabels, type BoardTemplate } from './templates'
 import { MAX_ESTIMATE_DAYS, startWorkPatch } from '../lib/schedule'
 import { applySpecPatch, emptySpec } from '../lib/interfaces'
+import { boardMembers, canEditTeam, carryMembers, remapIds, teamBoardIds } from '../lib/teams'
 
 /** What the new-card dialog can fill in besides the title. */
 export type NewCardDetails = Partial<
@@ -17,10 +18,22 @@ export type Action =
   | { type: 'label/add'; boardId: string; label: Label }
   | { type: 'label/update'; boardId: string; labelId: string; patch: Partial<Omit<Label, 'id'>> }
   | { type: 'label/delete'; boardId: string; labelId: string }
-  | { type: 'team/add'; boardId: string; member: TeamMember }
-  | { type: 'team/update'; boardId: string; memberId: string; patch: Partial<Omit<TeamMember, 'id'>> }
-  /** Remove someone from the team and from every card they were assigned to. */
-  | { type: 'team/delete'; boardId: string; memberId: string }
+  /**
+   * Start a team, in the account (`cloud`) or on this device. With `boardId`,
+   * that board moves into it, bringing along whoever its cards are assigned to.
+   */
+  | { type: 'team/create'; id: string; name: string; cloud: boolean; members?: TeamMember[]; boardId?: string; now: number }
+  | { type: 'team/rename'; teamId: string; name: string }
+  /** Delete a team: its boards are left without one and their cards without assignees. */
+  | { type: 'team/delete'; teamId: string }
+  /** Put a board in a team (or none), bringing along whoever its cards are assigned to. */
+  | { type: 'board/setTeam'; boardId: string; teamId: string | null }
+  | { type: 'member/add'; teamId: string; member: TeamMember }
+  | { type: 'member/update'; teamId: string; memberId: string; patch: Partial<Omit<TeamMember, 'id'>> }
+  /** Remove someone from the team and from every card they were assigned to, on all its boards. */
+  | { type: 'member/remove'; teamId: string; memberId: string }
+  /** Put the account's teams, as fetched from the server, in place of the local copies. */
+  | { type: 'teams/load'; teams: (Omit<Team, 'cloud'> & { role: Role })[] }
   /** Assign a card to a team member, or take them off it. */
   | { type: 'card/toggleAssignee'; cardId: string; memberId: string; now: number }
   | { type: 'column/add'; boardId: string; id: string; title: string }
@@ -64,16 +77,21 @@ export type Action =
   | { type: 'board/load'; doc: BoardDoc; role: Role }
   /** Drop a cloud board from this device (left, removed, or deleted elsewhere). */
   | { type: 'board/unload'; boardId: string }
-  /** Mark a board as living in the account (`role`) or on this device only (null). */
-  | { type: 'board/setCloud'; boardId: string; role: Role | null }
+  /**
+   * Mark a board as living in the account (`role`) or on this device only
+   * (null). `teamId` swaps its team for a copy that lives in the same place,
+   * with the same members.
+   */
+  | { type: 'board/setCloud'; boardId: string; role: Role | null; teamId?: string }
   /** Drop every cloud board, e.g. on sign-out. */
   | { type: 'cloud/clear' }
 
 export const initialState: AppState = {
-  version: 7,
+  version: 9,
   boardOrder: [],
   activeBoardId: null,
   boards: {},
+  teams: {},
   columns: {},
   cards: {},
 }
@@ -113,12 +131,10 @@ function removeBoard(state: AppState, boardId: string): AppState {
 function targetBoardId(state: AppState, action: Action): string | undefined {
   switch (action.type) {
     case 'board/rename':
+    case 'board/setTeam':
     case 'label/add':
     case 'label/update':
     case 'label/delete':
-    case 'team/add':
-    case 'team/update':
-    case 'team/delete':
     case 'column/add':
     case 'column/delete':
     case 'column/move':
@@ -166,10 +182,74 @@ export function isReadOnly(board: Board | undefined): boolean {
   return board?.cloud?.role === 'viewer'
 }
 
+/** The team an action changes, if it changes one. */
+function targetTeamId(action: Action): string | undefined {
+  switch (action.type) {
+    case 'team/rename':
+    case 'team/delete':
+    case 'member/add':
+    case 'member/update':
+    case 'member/remove':
+      return action.teamId
+    case 'board/setTeam':
+      return action.teamId ?? undefined
+    default:
+      return undefined
+  }
+}
+
+/** Change the cards on some boards, e.g. to take someone off them. */
+function mapBoardCards(state: AppState, boardIds: string[], change: (card: Card) => Card): AppState['cards'] {
+  const cards = { ...state.cards }
+  for (const boardId of boardIds) {
+    for (const columnId of state.boards[boardId]?.columnIds ?? []) {
+      for (const cardId of state.columns[columnId]?.cardIds ?? []) {
+        const card = cards[cardId]
+        if (card) cards[cardId] = change(card)
+      }
+    }
+  }
+  return cards
+}
+
+/** Move a board to another team (or none), carrying its cards' assignees over. */
+function moveBoardToTeam(state: AppState, boardId: string, teamId: string | null): AppState {
+  const board = state.boards[boardId]
+  if (!board || board.teamId === teamId) return state
+  const target = teamId ? state.teams[teamId] : undefined
+  // A board in the account needs a team in the account, and one on this device a team on this device.
+  if (teamId && (!target || !!target.cloud !== !!board.cloud)) return state
+  const source = boardMembers(state, board)
+  const used = board.columnIds
+    .flatMap((c) => state.columns[c]?.cardIds ?? [])
+    .flatMap((id) => state.cards[id]?.assigneeIds ?? [])
+  const carried = target ? carryMembers(source, target.members, used) : { members: [], map: new Map<string, string>() }
+  const cards = mapBoardCards(state, [boardId], (card) => {
+    if (card.assigneeIds.length === 0) return card
+    const assigneeIds = remapIds(card.assigneeIds.filter((id) => carried.map.has(id)), carried.map)
+    return assigneeIds.join() === card.assigneeIds.join() ? card : { ...card, assigneeIds }
+  })
+  const teams =
+    target && carried.members.length !== target.members.length
+      ? { ...state.teams, [target.id]: { ...target, members: carried.members } }
+      : state.teams
+  return { ...state, cards, teams, boards: { ...state.boards, [boardId]: { ...board, teamId } } }
+}
+
+function updateTeam(state: AppState, teamId: string, change: (team: Team) => Team | undefined): AppState {
+  const team = state.teams[teamId]
+  const next = team && change(team)
+  if (!next) return state
+  return { ...state, teams: { ...state.teams, [teamId]: next } }
+}
+
 export function reducer(state: AppState, action: Action): AppState {
   // Viewers of a shared board can look but not change anything.
   const target = targetBoardId(state, action)
   if (target && isReadOnly(state.boards[target])) return state
+  // Viewers can't change a team either.
+  const teamId = targetTeamId(action)
+  if (teamId && state.teams[teamId] && !canEditTeam(state.teams[teamId])) return state
 
   switch (action.type) {
     case 'board/add': {
@@ -187,7 +267,7 @@ export function reducer(state: AppState, action: Action): AppState {
         title: action.title.trim() || 'Untitled board',
         columnIds,
         labels: labelSeeds.map((seed, i) => ({ ...seed, id: labelIds[i] })),
-        team: [],
+        teamId: null,
         createdAt: action.now,
       }
       return {
@@ -248,41 +328,80 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, cards, boards: { ...state.boards, [board.id]: { ...board, labels } } }
     }
 
-    case 'team/add': {
-      const board = state.boards[action.boardId]
-      const name = action.member.name.trim()
-      if (!board || !name || board.team.some((m) => m.id === action.member.id)) return state
-      const member = { ...action.member, name, capacity: clampCapacity(action.member.capacity) }
-      return { ...state, boards: { ...state.boards, [board.id]: { ...board, team: [...board.team, member] } } }
+    case 'team/create': {
+      const name = action.name.trim()
+      if (!name || state.teams[action.id]) return state
+      const created: Team = {
+        id: action.id,
+        name,
+        members: (action.members ?? []).map((m) => ({ ...m, capacity: clampCapacity(m.capacity) })),
+        createdAt: action.now,
+        ...(action.cloud ? { cloud: { role: 'owner' as const } } : {}),
+      }
+      const next = { ...state, teams: { ...state.teams, [created.id]: created } }
+      return action.boardId ? reducer(next, { type: 'board/setTeam', boardId: action.boardId, teamId: created.id }) : next
     }
 
-    case 'team/update': {
-      const board = state.boards[action.boardId]
-      if (!board) return state
+    case 'team/rename': {
+      const name = action.name.trim()
+      if (!name) return state
+      return updateTeam(state, action.teamId, (t) => ({ ...t, name }))
+    }
+
+    case 'team/delete': {
+      const doomed = state.teams[action.teamId]
+      // Only the team's owner deletes it.
+      if (!doomed || (doomed.cloud && doomed.cloud.role !== 'owner')) return state
+      const boardIds = teamBoardIds(state, doomed.id)
+      const cards = mapBoardCards(state, boardIds, (card) => (card.assigneeIds.length ? { ...card, assigneeIds: [] } : card))
+      const boards = { ...state.boards }
+      for (const id of boardIds) boards[id] = { ...boards[id], teamId: null }
+      return { ...state, cards, boards, teams: omit(state.teams, [doomed.id]) }
+    }
+
+    case 'board/setTeam':
+      return moveBoardToTeam(state, action.boardId, action.teamId)
+
+    case 'member/add': {
+      const name = action.member.name.trim()
+      if (!name) return state
+      return updateTeam(state, action.teamId, (t) =>
+        t.members.some((m) => m.id === action.member.id)
+          ? undefined
+          : { ...t, members: [...t.members, { ...action.member, name, capacity: clampCapacity(action.member.capacity) }] },
+      )
+    }
+
+    case 'member/update': {
       const patch = { ...action.patch }
       if (patch.name !== undefined) {
         patch.name = patch.name.trim()
         if (!patch.name) delete patch.name
       }
       if (patch.capacity !== undefined) patch.capacity = clampCapacity(patch.capacity)
-      const team = board.team.map((m) => (m.id === action.memberId ? { ...m, ...patch } : m))
-      return { ...state, boards: { ...state.boards, [board.id]: { ...board, team } } }
+      return updateTeam(state, action.teamId, (t) => ({
+        ...t,
+        members: t.members.map((m) => (m.id === action.memberId ? { ...m, ...patch } : m)),
+      }))
     }
 
-    case 'team/delete': {
-      const board = state.boards[action.boardId]
-      if (!board) return state
-      const cards = { ...state.cards }
-      for (const columnId of board.columnIds) {
-        for (const cardId of state.columns[columnId]?.cardIds ?? []) {
-          const card = cards[cardId]
-          if (card?.assigneeIds.includes(action.memberId)) {
-            cards[cardId] = { ...card, assigneeIds: card.assigneeIds.filter((id) => id !== action.memberId) }
-          }
-        }
-      }
-      const team = board.team.filter((m) => m.id !== action.memberId)
-      return { ...state, cards, boards: { ...state.boards, [board.id]: { ...board, team } } }
+    case 'member/remove': {
+      const owner = state.teams[action.teamId]
+      if (!owner) return state
+      const cards = mapBoardCards(state, teamBoardIds(state, owner.id), (card) =>
+        card.assigneeIds.includes(action.memberId)
+          ? { ...card, assigneeIds: card.assigneeIds.filter((id) => id !== action.memberId) }
+          : card,
+      )
+      const members = owner.members.filter((m) => m.id !== action.memberId)
+      return { ...state, cards, teams: { ...state.teams, [owner.id]: { ...owner, members } } }
+    }
+
+    case 'teams/load': {
+      const teams: AppState['teams'] = {}
+      for (const [id, t] of Object.entries(state.teams)) if (!t.cloud) teams[id] = t
+      for (const { role, ...t } of action.teams) teams[t.id] = { ...t, cloud: { role } }
+      return { ...state, teams }
     }
 
     case 'card/toggleAssignee': {
@@ -291,7 +410,7 @@ export function reducer(state: AppState, action: Action): AppState {
       if (!card || !board) return state
       const assigned = card.assigneeIds.includes(action.memberId)
       // Only people on the board's team can be assigned.
-      if (!assigned && !board.team.some((m) => m.id === action.memberId)) return state
+      if (!assigned && !boardMembers(state, board).some((m) => m.id === action.memberId)) return state
       const assigneeIds = assigned
         ? card.assigneeIds.filter((id) => id !== action.memberId)
         : [...card.assigneeIds, action.memberId]
@@ -393,7 +512,8 @@ export function reducer(state: AppState, action: Action): AppState {
         // Only the board's own labels and team members can be put on a card.
         if (details.labelIds) card.labelIds = details.labelIds.filter((id) => board?.labels.some((l) => l.id === id))
         if (details.assigneeIds) {
-          card.assigneeIds = [...new Set(details.assigneeIds)].filter((id) => board?.team.some((m) => m.id === id))
+          const team = boardMembers(state, board)
+          card.assigneeIds = [...new Set(details.assigneeIds)].filter((id) => team.some((m) => m.id === id))
         }
         if (details.startDate) card.startDate = details.startDate
         if (details.dueDate) card.dueDate = details.dueDate
@@ -416,7 +536,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const added = reducer(state, { type: 'card/add', columnId: action.columnId, id: action.id, title: action.title, now: action.now })
       const card = added.cards[action.id]
       if (!card) return state
-      const onTeam = action.memberId !== null && board.team.some((m) => m.id === action.memberId)
+      const onTeam = action.memberId !== null && boardMembers(state, board).some((m) => m.id === action.memberId)
       const next: Card = { ...card, spec: emptySpec(action.senderAdapter, action.receiverAdapter), assigneeIds: onTeam ? [action.memberId!] : [] }
       return { ...added, cards: { ...added.cards, [card.id]: next } }
     }
@@ -549,15 +669,23 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case 'state/replace': {
       // Importing a backup replaces the boards on this device. Account boards
-      // stay as they are; boards in the backup come back as device-only copies.
+      // stay as they are; boards in the backup come back as device-only copies,
+      // and so do its teams.
       const cloudIds = state.boardOrder.filter((id) => state.boards[id]?.cloud)
       let next = cloudIds.reduce((acc, id) => removeBoard(acc, id), action.state)
+      const localTeams: AppState['teams'] = Object.fromEntries(
+        Object.entries(next.teams ?? {}).map(([id, team]) => {
+          const { cloud: _cloud, ...rest } = team
+          return [id, rest]
+        }),
+      )
       next = {
         ...next,
+        teams: { ...localTeams, ...Object.fromEntries(Object.entries(state.teams).filter(([, t]) => t.cloud)) },
         boards: Object.fromEntries(
           Object.entries(next.boards).map(([id, board]) => {
             const { cloud: _cloud, ...rest } = board
-            return [id, rest]
+            return [id, { ...rest, teamId: board.teamId && localTeams[board.teamId] ? board.teamId : null }]
           }),
         ),
       }
@@ -594,12 +722,18 @@ export function reducer(state: AppState, action: Action): AppState {
       if (!board) return state
       const { cloud: _cloud, ...rest } = board
       const next: Board = action.role ? { ...rest, cloud: { role: action.role } } : rest
+      if (action.teamId && state.teams[action.teamId]) next.teamId = action.teamId
+      // The board's team has to live where the board does.
+      const team = next.teamId ? state.teams[next.teamId] : undefined
+      if (team && !!team.cloud !== !!next.cloud) next.teamId = null
       return { ...state, boards: { ...state.boards, [board.id]: next } }
     }
 
-    case 'cloud/clear':
-      return state.boardOrder
+    case 'cloud/clear': {
+      const cleared = state.boardOrder
         .filter((id) => state.boards[id]?.cloud)
         .reduce((acc, id) => removeBoard(acc, id), state)
+      return { ...cleared, teams: Object.fromEntries(Object.entries(state.teams).filter(([, t]) => !t.cloud)) }
+    }
   }
 }

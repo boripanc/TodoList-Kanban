@@ -40,15 +40,49 @@ export function restApi(db: Db) {
 
   api.put('/boards/:boardId/team/:member', async (c) =>
     c.json(
-      await k.setTeamMember(db, user(c), c.req.param('boardId'), c.req.param('member'), v.teamMemberInput(await body(c))),
+      await k.setTeamMember(
+        db,
+        user(c),
+        { boardId: c.req.param('boardId') },
+        c.req.param('member'),
+        v.teamMemberInput(await body(c)),
+      ),
     ),
   )
   api.delete('/boards/:boardId/team/:member', async (c) => {
-    await k.removeTeamMember(db, user(c), c.req.param('boardId'), c.req.param('member'))
+    await k.removeTeamMember(db, user(c), { boardId: c.req.param('boardId') }, c.req.param('member'))
     return c.json({ ok: true })
   })
-  api.get('/boards/:boardId/workload', async (c) => c.json(await k.getWorkload(db, user(c), c.req.param('boardId'))))
+  api.get('/boards/:boardId/workload', async (c) =>
+    c.json(await k.getWorkload(db, user(c), { boardId: c.req.param('boardId') })),
+  )
   api.get('/workload', async (c) => c.json(await k.getWorkload(db, user(c))))
+
+  api.get('/teams', async (c) => c.json(await k.listTeams(db, user(c))))
+  api.post('/teams', async (c) => c.json(await k.createTeam(db, user(c), v.newTeamInput(await body(c))), 201))
+  api.get('/teams/:teamId', async (c) => c.json(await k.getTeam(db, user(c), c.req.param('teamId'))))
+  api.delete('/teams/:teamId', async (c) => {
+    await k.deleteTeam(db, user(c), c.req.param('teamId'))
+    return c.json({ ok: true })
+  })
+  api.put('/teams/:teamId/members/:member', async (c) =>
+    c.json(
+      await k.setTeamMember(
+        db,
+        user(c),
+        { teamId: c.req.param('teamId') },
+        c.req.param('member'),
+        v.teamMemberInput(await body(c)),
+      ),
+    ),
+  )
+  api.delete('/teams/:teamId/members/:member', async (c) => {
+    await k.removeTeamMember(db, user(c), { teamId: c.req.param('teamId') }, c.req.param('member'))
+    return c.json({ ok: true })
+  })
+  api.get('/teams/:teamId/workload', async (c) =>
+    c.json(await k.getWorkload(db, user(c), { teamId: c.req.param('teamId') })),
+  )
 
   api.post('/boards/:boardId/columns', async (c) =>
     c.json(await k.createColumn(db, user(c), c.req.param('boardId'), v.columnInput(await body(c), true)), 201),

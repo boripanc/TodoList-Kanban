@@ -204,7 +204,7 @@ describe('boards', () => {
     const ana = await ownerWithBoard()
     expect((await ana.call('GET', '/boards')).data).toEqual([expect.objectContaining({ id: 'b1', role: 'owner' })])
     const doc = (await ana.call('GET', '/boards/b1')).data
-    expect(doc.board).toEqual({ ...board.board, team: [] })
+    expect(doc.board).toEqual({ ...board.board, team_id: null })
     expect(doc.cards).toEqual([expect.objectContaining({ ...board.cards[0], board_id: 'b1' })])
 
     const res = await ana.call('POST', '/boards/b1/changes', {
@@ -344,29 +344,38 @@ describe('boards', () => {
 
   it('syncs the team and card assignees, and keeps them when an older app leaves them out', async () => {
     const ana = await ownerWithBoard()
-    const team = [{ id: 'm1', name: 'Kim', color: '#0090ff', capacity: 2 }]
+    const members = [{ id: 'm1', name: 'Kim', color: '#0090ff', capacity: 2 }]
+    expect((await ana.call('PUT', '/teams/t1', { name: 'Crew', members, created_at: 5 })).status).toBe(200)
     await ana.call('POST', '/boards/b1/changes', {
-      board: { title: 'Trip', labels: board.board.labels, team },
+      board: { title: 'Trip', labels: board.board.labels, team_id: 't1' },
       upsertCards: [{ ...card('c1', 'Book flights', 'col1', 0), assignee_ids: ['m1'] }],
     })
     const stored = () => ana.call('GET', '/boards/b1').then((r) => r.data)
-    expect((await stored()).board.team).toEqual(team)
+    expect((await stored()).board.team_id).toBe('t1')
     expect((await stored()).cards[0].assignee_ids).toEqual(['m1'])
+    expect((await ana.call('GET', '/teams')).data).toEqual([
+      { id: 't1', name: 'Crew', members, created_at: 5, role: 'owner' },
+    ])
 
-    // An app from before teams sends neither; both stay.
+    // An app from before teams sends neither; both stay. Its old per-board team is ignored.
     await ana.call('POST', '/boards/b1/changes', {
-      board: { title: 'Trip!', labels: [] },
+      board: { title: 'Trip!', labels: [], team: [{ id: 'x', name: 'Old', color: '#000', capacity: 0 }] },
       upsertCards: [card('c1', 'Book cheap flights', 'col1', 0)],
     })
     const after = await stored()
-    expect(after.board).toMatchObject({ title: 'Trip!', team })
+    expect(after.board).toMatchObject({ title: 'Trip!', team_id: 't1' })
     expect(after.cards[0]).toMatchObject({ title: 'Book cheap flights', assignee_ids: ['m1'] })
+    expect((await ana.call('GET', '/teams')).data[0].members).toEqual(members)
 
-    const bad = await ana.call('POST', '/boards/b1/changes', {
-      board: { title: 'Trip', labels: [], team: [{ ...team[0], capacity: -1 }] },
-    })
+    const bad = await ana.call('PUT', '/teams/t1', { name: 'Crew', members: [{ ...members[0], capacity: -1 }], created_at: 5 })
     expect(bad.status).toBe(400)
     expect(bad.data.error).toMatch(/capacity/)
+    expect((await ana.call('PUT', '/teams/t1', { name: ' ', members, created_at: 5 })).status).toBe(400)
+    expect((await ana.call('PUT', '/teams/t1', { id: 't2', name: 'Crew', members, created_at: 5 })).status).toBe(400)
+
+    // Out of the team again.
+    await ana.call('POST', '/boards/b1/changes', { board: { title: 'Trip!', labels: [], team_id: null } })
+    expect((await stored()).board.team_id).toBeNull()
   })
 
   it('rejects malformed changes', async () => {
@@ -1261,7 +1270,8 @@ describe('assignment approval', () => {
     })
     const stored = (await ana.call('GET', '/boards/b1')).data
     expect(stored.cards[0].assignee_ids).toEqual([])
-    expect(stored.board.team.map((m: { name: string }) => m.name)).toEqual(['Kim'])
+    const team = async () => (await ana.call('GET', '/v1/boards/b1')).data.team as { id: string; name: string }[]
+    expect((await team()).map((m) => m.name)).toEqual(['Kim'])
 
     const listed = await ana.call('GET', '/boards/b1/assignment-requests')
     expect(listed.data).toEqual([
@@ -1271,8 +1281,8 @@ describe('assignment approval', () => {
 
     expect((await ana.call('POST', '/boards/b1/assignment-requests/c1/approve', {})).status).toBe(200)
     const approved = (await ana.call('GET', '/boards/b1')).data
-    expect(approved.board.team.map((m: { name: string }) => m.name)).toEqual(['Kim', 'Lee'])
-    expect(approved.cards[0].assignee_ids).toEqual(approved.board.team.map((m: { id: string }) => m.id))
+    expect((await team()).map((m) => m.name)).toEqual(['Kim', 'Lee'])
+    expect(approved.cards[0].assignee_ids).toEqual((await team()).map((m) => m.id))
     expect((await ana.call('GET', '/boards/b1/assignment-requests')).data).toEqual([])
     expect((await tool(claude, 'get_card', { cardId: 'c1' })).data.pendingAssignment).toBeNull()
     expect((await ana.call('POST', '/boards/b1/assignment-requests/c1/approve', {})).status).toBe(404)
@@ -1303,7 +1313,7 @@ describe('assignment approval', () => {
     expect(received).toContainEqual({ userId: ana.user.id, event: { type: 'board', boardId: 'b1' } })
     const after = (await ana.call('GET', '/boards/b1')).data
     expect(after.cards.find((c: { id: string }) => c.id === id).assignee_ids).toEqual([])
-    expect(after.board.team).toEqual([])
+    expect((await ana.call('GET', '/v1/boards/b1')).data.team).toEqual([])
     expect((await ana.call('GET', '/boards/b1/assignment-requests')).data).toEqual([])
 
     // A deleted card takes its request with it.
@@ -2097,5 +2107,245 @@ describe('SSO sign-in (OpenID Connect)', () => {
     const page = await (await visit(location)).text()
     expect(page).toContain('Signed in as <strong>ana@example.com</strong>')
     expect(page).not.toContain('Sign in with Teddy SSO')
+  })
+})
+
+describe('teams', () => {
+  /** Ana's board b1 in her team t1 with Kim, and a second board b2 she puts in it too. */
+  async function teamWithTwoBoards() {
+    const ana = await ownerWithBoard()
+    const members = [{ id: 'kim', name: 'Kim', color: '#0090ff', capacity: 2 }]
+    await ana.call('PUT', '/teams/t1', { name: 'Crew', members, created_at: 1 })
+    await ana.call('POST', '/boards/b1/changes', {
+      board: { title: 'Trip', labels: [], team_id: 't1' },
+      upsertCards: [{ ...card('c1', 'Book flights', 'col1', 0), assignee_ids: ['kim'] }],
+    })
+    const second = {
+      board: { id: 'b2', title: 'Home', labels: [], team_id: 't1', created_at: 2 },
+      columns: [{ id: 'h1', position: 0, title: 'To do', wip_limit: 0 }],
+      cards: [{ ...card('h1c', 'Paint', 'h1', 0), assignee_ids: ['kim'] }],
+    }
+    expect((await ana.call('POST', '/boards', second)).status).toBe(200)
+    return ana
+  }
+
+  it('lets editors of a team’s boards change it, viewers only see it, and only the owner delete it', async () => {
+    const ana = await teamWithTwoBoards()
+    const ben = await share(ana, 'ben@example.com', 'editor')
+    const cy = await share(ana, 'cy@example.com', 'viewer')
+    const dee = await signUp('dee@example.com')
+
+    expect((await ben.call('GET', '/teams')).data).toEqual([expect.objectContaining({ id: 't1', role: 'editor' })])
+    expect((await cy.call('GET', '/teams')).data).toEqual([expect.objectContaining({ id: 't1', role: 'viewer' })])
+    expect((await dee.call('GET', '/teams')).data).toEqual([])
+
+    const members = [{ id: 'kim', name: 'Kim', color: '#0090ff', capacity: 3 }]
+    expect((await ben.call('PUT', '/teams/t1', { name: 'Crew', members, created_at: 1 })).status).toBe(200)
+    expect((await ana.call('GET', '/teams')).data[0].members).toEqual(members)
+    expect((await cy.call('PUT', '/teams/t1', { name: 'Mine', members: [], created_at: 1 })).status).toBe(403)
+    expect((await dee.call('PUT', '/teams/t1', { name: 'Mine', members: [], created_at: 1 })).status).toBe(404)
+    expect((await ben.call('DELETE', '/teams/t1')).status).toBe(403)
+    expect((await dee.call('DELETE', '/teams/t1')).status).toBe(404)
+
+    // A board can only join a team its editor may change.
+    expect((await dee.call('PUT', '/teams/t9', { name: 'Dee team', members: [], created_at: 1 })).status).toBe(200)
+    const join = await ben.call('POST', '/boards/b1/changes', { board: { title: 'Trip', labels: [], team_id: 't9' } })
+    expect(join.status).toBe(404)
+    const create = await dee.call('POST', '/boards', { ...board, board: { ...board.board, id: 'b9', team_id: 't1' } })
+    expect(create.status).toBe(404)
+
+    // Deleting the team leaves its boards without one and their cards without assignees.
+    expect((await ana.call('DELETE', '/teams/t1')).status).toBe(200)
+    const trip = (await ana.call('GET', '/boards/b1')).data
+    expect(trip.board.team_id).toBeNull()
+    expect(trip.cards[0].assignee_ids).toEqual([])
+    expect((await ben.call('GET', '/teams')).data).toEqual([])
+  })
+
+  it('tells everyone on a team’s boards when it changes or goes', async () => {
+    const ana = await teamWithTwoBoards()
+    const ben = await share(ana, 'ben@example.com', 'viewer')
+    const dee = await signUp('dee@example.com')
+    const stop = await events.start()
+    received = []
+    await ana.call('PUT', '/teams/t1', { name: 'Crew!', members: [], created_at: 1 })
+    await ana.call('DELETE', '/teams/t1')
+    await new Promise((r) => setTimeout(r, 50))
+    await stop()
+    const heard = (userId: string) => received.filter((r) => r.userId === userId && r.event.type === 'team')
+    expect(heard(ana.user.id)).toHaveLength(2)
+    expect(heard(ben.user.id)).toHaveLength(2)
+    expect(heard(dee.user.id)).toHaveLength(0)
+  })
+
+  it('lists, creates and deletes teams, and reports a team’s workload across its boards (REST)', async () => {
+    const ana = await teamWithTwoBoards()
+    const n8n = await apiKeyFor(ana)
+    const listed = (await n8n.call('GET', '/v1/teams')).data
+    expect(listed).toEqual([
+      expect.objectContaining({
+        id: 't1',
+        name: 'Crew',
+        role: 'owner',
+        boards: [
+          { id: 'b2', title: 'Home' },
+          { id: 'b1', title: 'Trip' },
+        ],
+      }),
+    ])
+    expect((await n8n.call('GET', '/v1/boards')).data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'b1', teamId: 't1', teamName: 'Crew' })]),
+    )
+    expect((await n8n.call('GET', '/v1/boards/b2')).data).toMatchObject({ teamId: 't1', teamName: 'Crew' })
+
+    const load = (await n8n.call('GET', '/v1/teams/t1/workload')).data
+    expect(load.team).toEqual({ id: 't1', name: 'Crew' })
+    expect(load.members).toEqual([
+      expect.objectContaining({ name: 'Kim', openCount: 2, capacity: 2, level: 'full', memberIds: ['kim'] }),
+    ])
+    expect(load.members[0].openCards.map((c: { board: string }) => c.board)).toEqual(['Home', 'Trip'])
+    // Across all boards, one team's boards share their people (Kim isn't counted twice).
+    const all = (await n8n.call('GET', '/v1/workload')).data
+    expect(all.members).toEqual([expect.objectContaining({ name: 'Kim', openCount: 2, capacity: 2 })])
+
+    // Team members by team id; removing someone takes them off cards on every board of the team.
+    expect((await n8n.call('PUT', '/v1/teams/t1/members/Lee', { capacity: 1 })).data).toMatchObject({ name: 'Lee' })
+    expect((await n8n.call('PUT', '/v1/teams/t1/members/lee', { name: 'kim' })).status).toBe(409)
+    expect((await n8n.call('DELETE', '/v1/teams/t1/members/Kim')).status).toBe(200)
+    expect((await n8n.call('GET', '/v1/cards/h1c')).data.assignees).toEqual([])
+    expect((await n8n.call('GET', '/v1/cards/c1')).data.assignees).toEqual([])
+
+    const created = await n8n.call('POST', '/v1/teams', { name: 'Ops', members: [{ name: 'Max', capacity: 4 }] })
+    expect(created.status).toBe(201)
+    expect(created.data).toMatchObject({ name: 'Ops', role: 'owner', members: [{ name: 'Max', capacity: 4 }], boards: [] })
+    expect((await n8n.call('POST', '/v1/teams', { name: ' ' })).status).toBe(400)
+    expect((await n8n.call('POST', '/v1/teams', { name: 'X', members: [{ name: 'A' }, { name: 'a' }] })).status).toBe(409)
+    expect((await n8n.call('DELETE', `/v1/teams/${created.data.id}`)).status).toBe(200)
+    expect((await n8n.call('GET', `/v1/teams/${created.data.id}`)).status).toBe(404)
+
+    const viewer = await apiKeyFor(await share(ana, 'ben@example.com', 'viewer'))
+    expect((await viewer.call('GET', '/v1/teams/t1/workload')).status).toBe(200)
+    expect((await viewer.call('PUT', '/v1/teams/t1/members/Ben', {})).status).toBe(403)
+    expect((await viewer.call('DELETE', '/v1/teams/t1')).status).toBe(403)
+    const stranger = await apiKeyFor(await signUp('eve@example.com'))
+    expect((await stranger.call('GET', '/v1/teams/t1')).status).toBe(404)
+    expect((await stranger.call('GET', '/v1/teams/t1/workload')).status).toBe(404)
+    expect((await stranger.call('PUT', '/v1/teams/t1/members/Eve', {})).status).toBe(404)
+  })
+
+  it('moves a board to another team, bringing along whoever its cards are assigned to', async () => {
+    const ana = await teamWithTwoBoards()
+    const n8n = await apiKeyFor(ana)
+    const other = (await n8n.call('POST', '/v1/teams', { name: 'Ops', members: [{ name: 'KIM' }] })).data
+    await n8n.call('PATCH', '/v1/cards/c1', { assignees: ['Kim', 'Lee'] })
+
+    const moved = await n8n.call('PATCH', '/v1/boards/b1', { teamId: other.id })
+    expect(moved.status).toBe(200)
+    expect(moved.data).toMatchObject({ teamId: other.id, teamName: 'Ops' })
+    expect(moved.data.team.map((m: { name: string }) => m.name)).toEqual(['KIM', 'Lee'])
+    const opsKim = moved.data.team[0].id
+    expect((await n8n.call('GET', '/v1/cards/c1')).data.assignees.map((a: { id: string }) => a.id)).toEqual([
+      opsKim,
+      moved.data.team[1].id,
+    ])
+
+    // Out of any team, the cards lose their assignees.
+    const out = await n8n.call('PATCH', '/v1/boards/b1', { teamId: null })
+    expect(out.data).toMatchObject({ teamId: null, team: [] })
+    expect((await n8n.call('GET', '/v1/cards/c1')).data.assignees).toEqual([])
+
+    // An editor of the board can't put it in a team they may not change: not Ana's Ops (none of
+    // whose boards Ben is on), and not someone else's.
+    const ben = await share(ana, 'ben@example.com', 'editor')
+    const bens = await apiKeyFor(ben)
+    expect((await bens.call('PATCH', '/v1/boards/b1', { teamId: other.id })).status).toBe(404)
+    expect((await bens.call('PATCH', '/v1/boards/b1', { title: 'Trip' })).status).toBe(200)
+    const deeTeam = (await (await apiKeyFor(await signUp('dee@example.com'))).call('POST', '/v1/teams', { name: 'Dee' })).data
+    expect((await bens.call('PATCH', '/v1/boards/b1', { teamId: deeTeam.id })).status).toBe(404)
+  })
+
+  it('lists teams, creates them and moves boards through MCP', async () => {
+    const ana = await teamWithTwoBoards()
+    const n8n = await apiKeyFor(ana)
+    const call = async (name: string, args: object) => {
+      const res = await n8n.call(
+        'POST',
+        '/mcp',
+        { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } },
+        { accept: 'application/json, text/event-stream' },
+      )
+      const { isError, content } = res.data.result
+      return isError ? { error: content[0].text } : JSON.parse(content[0].text)
+    }
+    expect(await call('list_teams', {})).toEqual([expect.objectContaining({ id: 't1', name: 'Crew' })])
+    const ops = await call('create_team', { name: 'Ops', members: [{ name: 'Max', capacity: 2 }] })
+    expect(ops).toMatchObject({ name: 'Ops', members: [{ name: 'Max', capacity: 2 }] })
+    expect(await call('set_board_team', { boardId: 'b2', teamId: ops.id })).toMatchObject({ teamId: ops.id })
+    expect(await call('set_team_member', { teamId: ops.id, member: 'Max', capacity: 5 })).toMatchObject({ capacity: 5 })
+    expect(await call('set_team_member', { member: 'Max' })).toEqual({ error: expect.stringMatching(/teamId or boardId/) })
+
+    const load = await call('get_workload', { teamId: ops.id })
+    expect(load.team).toEqual({ id: ops.id, name: 'Ops' })
+    expect(load.boards).toEqual([{ id: 'b2', title: 'Home' }])
+    // Kim came along with the Home board's card.
+    expect(load.members.map((m: { name: string; openCount: number }) => [m.name, m.openCount])).toEqual([
+      ['Max', 0],
+      ['Kim', 1],
+    ])
+    expect(await call('remove_team_member', { teamId: ops.id, member: 'Kim' })).toEqual({ ok: true })
+    expect(await call('set_board_team', { boardId: 'b2', teamId: null })).toMatchObject({ teamId: null })
+  })
+
+  it('moves each owner’s board teams into one team when upgrading (migration 016)', async () => {
+    const ana = await ownerWithBoard()
+    await ana.call('POST', '/boards', { ...board, board: { ...board.board, id: 'b2', title: 'Home', created_at: 2 }, columns: [{ id: 'k1', position: 0, title: 'To do', wip_limit: 0 }], cards: [{ ...card('k1c', 'Paint', 'k1', 0) }] })
+    const ben = await signUp('ben@example.com')
+    await ben.call('POST', '/boards', { ...board, board: { ...board.board, id: 'b3', title: 'Bens' }, columns: [{ id: 'z1', position: 0, title: 'To do', wip_limit: 0 }], cards: [] })
+    // Boards as they were before teams of their own: a team on each.
+    await db.query(`update kanban.boards set team = $2 where id = $1`, [
+      'b1',
+      JSON.stringify([
+        { id: 'kim', name: 'Kim', color: '#111', capacity: 1 },
+        { id: 'lee', name: 'Lee', color: '#222', capacity: 0 },
+      ]),
+    ])
+    await db.query(`update kanban.boards set team = $2 where id = $1`, [
+      'b2',
+      JSON.stringify([
+        { id: 'kim-home', name: ' kim', color: '#333', capacity: 3 },
+        { id: 'kim', name: 'Max', color: '#444', capacity: 0 },
+      ]),
+    ])
+    await db.query(`update kanban.boards set team = '[{"id":"zed","name":"Zed","color":"#555","capacity":0}]' where id = 'b3'`)
+    await db.query(`update kanban.cards set assignee_ids = '["lee","kim","gone"]' where id = 'c1'`)
+    await db.query(`update kanban.cards set assignee_ids = '["kim-home","kim"]' where id = 'k1c'`)
+    await db.query(
+      `insert into kanban.assignment_requests (card_id, board_id, assignees, requested_by) values ('k1c', 'b2', $1, $2)`,
+      [JSON.stringify([{ id: 'kim-home', name: 'kim' }, { id: null, name: 'New' }]), ana.user.id],
+    )
+    const sql = readFileSync(new URL('../migrations/016_teams.sql', import.meta.url), 'utf8')
+    await db.query(sql.slice(sql.indexOf('do $$')))
+
+    const teams = (await ana.call('GET', '/teams')).data
+    expect(teams).toEqual([
+      expect.objectContaining({
+        name: "ana's team",
+        role: 'owner',
+        members: [
+          { id: 'kim', name: 'Kim', color: '#111', capacity: 3 },
+          { id: 'lee', name: 'Lee', color: '#222', capacity: 0 },
+          { id: 'kim-2', name: 'Max', color: '#444', capacity: 0 },
+        ],
+      }),
+    ])
+    const { rows } = await db.query<{ id: string; team_id: string | null }>('select id, team_id from kanban.boards order by id')
+    expect(rows.find((r) => r.id === 'b1')!.team_id).toBe(teams[0].id)
+    expect(rows.find((r) => r.id === 'b2')!.team_id).toBe(teams[0].id)
+    expect((await ben.call('GET', '/teams')).data).toEqual([expect.objectContaining({ name: "ben's team" })])
+    const cards = await db.query<{ id: string; assignee_ids: string[] }>('select id, assignee_ids from kanban.cards order by id')
+    expect(cards.rows.find((c) => c.id === 'c1')!.assignee_ids).toEqual(['lee', 'kim', 'gone'])
+    expect(cards.rows.find((c) => c.id === 'k1c')!.assignee_ids).toEqual(['kim', 'kim-2'])
+    const requests = await db.query<{ assignees: unknown }>('select assignees from kanban.assignment_requests')
+    expect(requests.rows[0].assignees).toEqual([{ id: 'kim', name: 'kim' }, { id: null, name: 'New' }])
   })
 })

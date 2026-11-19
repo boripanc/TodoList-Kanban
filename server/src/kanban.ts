@@ -11,7 +11,9 @@ import { isDoneColumn } from '../../src/lib/done.ts'
 import { todayISO } from '../../src/lib/dates.ts'
 import { dueFromEstimate, needsDateRange, scheduleProblem, startWorkPatch } from '../../src/lib/schedule.ts'
 import { computeWorkload, loadLevel, mergeWorkloads, type LoadLevel, type Workload } from '../../src/lib/workload.ts'
-import { canEdit, canRead, fail, requireRole, type Role, type User } from './access.ts'
+import { carryMembers, remapIds } from '../../src/lib/teams.ts'
+import type { TeamSummary } from '../../src/cloud/doc.ts'
+import { canEdit, canRead, fail, requireRole, requireTeamRole, type Role, type User } from './access.ts'
 import type { Db, Queryable } from './db.ts'
 import type {
   AttachmentInput,
@@ -92,11 +94,27 @@ export interface ApiBoard {
   title: string
   role: Role
   labels: ApiLabel[]
-  /** People cards can be assigned to; capacity is how many open cards they can take on (0 = no limit). */
+  /** The team the board belongs to, or null. */
+  teamId: string | null
+  teamName: string | null
+  /** The team's members, whom cards can be assigned to; capacity is how many open cards they can take on (0 = no limit). */
   team: TeamMember[]
   createdAt: string
   updatedAt: string
   columns: ApiColumn[]
+}
+
+/** A team: people with the boards they work on. */
+export interface ApiTeam {
+  id: string
+  name: string
+  /** owner, editor (can change one of its boards) or viewer. */
+  role: Role
+  members: TeamMember[]
+  /** Its boards that the caller can see. */
+  boards: { id: string; title: string }[]
+  createdAt: string
+  updatedAt: string
 }
 
 export interface ApiWorkloadCard {
@@ -125,6 +143,8 @@ export interface ApiMemberLoad {
 }
 
 export interface ApiWorkload {
+  /** The team, when the workload is a team's. */
+  team: { id: string; name: string } | null
   boards: { id: string; title: string }[]
   members: ApiMemberLoad[]
   unassigned: ApiWorkloadCard[]
@@ -134,6 +154,8 @@ export interface ApiBoardSummary {
   id: string
   title: string
   role: Role
+  teamId: string | null
+  teamName: string | null
   cardCount: number
   updatedAt: string
 }
@@ -148,6 +170,8 @@ type BoardDbRow = {
   title: string
   labels: ApiLabel[]
   team: TeamMember[]
+  team_id: string | null
+  team_name: string | null
   created_at: string | number
   updated_at: Date
 }
@@ -217,9 +241,12 @@ async function pendingByCard(q: Queryable, where: string, params: unknown[]) {
 
 async function loadBoard(q: Queryable, boardId: string, role: Role): Promise<ApiBoard> {
   const [boards, columns, cards, pending] = await Promise.all([
-    q.query<BoardDbRow>('select id, title, labels, team, created_at, updated_at from kanban.boards where id = $1', [
-      boardId,
-    ]),
+    q.query<BoardDbRow>(
+      `select b.id, b.title, b.labels, coalesce(t.members, '[]'::jsonb) as team, b.team_id, t.name as team_name,
+         b.created_at, b.updated_at
+       from kanban.boards b left join kanban.teams t on t.id = b.team_id where b.id = $1`,
+      [boardId],
+    ),
     q.query<ColumnDbRow>('select id, title, wip_limit, position from kanban.columns where board_id = $1', [boardId]),
     q.query<CardDbRow>('select * from kanban.cards where board_id = $1', [boardId]),
     pendingByCard(q, 'r.board_id = $1', [boardId]),
@@ -244,6 +271,8 @@ async function loadBoard(q: Queryable, boardId: string, role: Role): Promise<Api
     title: board.title,
     role,
     labels: board.labels,
+    teamId: board.team_id,
+    teamName: board.team_name,
     team: board.team,
     createdAt: iso(board.created_at),
     updatedAt: iso(board.updated_at),
@@ -326,10 +355,45 @@ async function resolveLabels(tx: Queryable, boardId: string, wanted: string[]): 
   return ids
 }
 
-/** Team member ids for ids or names, adding a team member for each name the board doesn't have yet. */
+/** A board's team and its members; `lock` holds the team row until the transaction ends. */
+async function boardTeam(q: Queryable, boardId: string, lock = false): Promise<{ id: string | null; members: TeamMember[] }> {
+  const { rows } = await q.query<{ team_id: string | null }>('select team_id from kanban.boards where id = $1', [boardId])
+  const teamId = rows[0]?.team_id ?? null
+  if (!teamId) return { id: null, members: [] }
+  const team = await q.query<{ members: TeamMember[] }>(
+    `select members from kanban.teams where id = $1${lock ? ' for update' : ''}`,
+    [teamId],
+  )
+  return { id: teamId, members: team.rows[0]?.members ?? [] }
+}
+
+/** The board's team, starting one for it (named after it, owned by its owner) when it has none. */
+async function ensureBoardTeam(tx: Queryable, boardId: string): Promise<{ id: string; members: TeamMember[] }> {
+  const team = await boardTeam(tx, boardId, true)
+  if (team.id) return { id: team.id, members: team.members }
+  const { rows } = await tx.query<{ owner_id: string; title: string }>(
+    'select owner_id, title from kanban.boards where id = $1',
+    [boardId],
+  )
+  const id = randomUUID()
+  await tx.query('insert into kanban.teams (id, owner_id, name, created_at) values ($1, $2, $3, $4)', [
+    id,
+    rows[0].owner_id,
+    `${rows[0].title} team`.slice(0, 100),
+    Date.now(),
+  ])
+  await tx.query('update kanban.boards set team_id = $2 where id = $1', [boardId, id])
+  return { id, members: [] }
+}
+
+async function saveMembers(tx: Queryable, teamId: string, members: TeamMember[]) {
+  await tx.query('update kanban.teams set members = $2 where id = $1', [teamId, JSON.stringify(members)])
+}
+
+/** Team member ids for ids or names, adding a team member for each name the board's team doesn't have yet. */
 async function resolveAssignees(tx: Queryable, boardId: string, wanted: string[]): Promise<string[]> {
-  const { rows } = await tx.query<{ team: TeamMember[] }>('select team from kanban.boards where id = $1', [boardId])
-  const team = [...(rows[0]?.team ?? [])]
+  const current = await boardTeam(tx, boardId, true)
+  const team = [...current.members]
   const ids: string[] = []
   for (const want of wanted) {
     let member = findMember(team, want)
@@ -339,8 +403,9 @@ async function resolveAssignees(tx: Queryable, boardId: string, wanted: string[]
     }
     if (!ids.includes(member.id)) ids.push(member.id)
   }
-  if (team.length !== rows[0]?.team.length) {
-    await tx.query('update kanban.boards set team = $2 where id = $1', [boardId, JSON.stringify(team)])
+  if (team.length !== current.members.length) {
+    const teamId = current.id ?? (await ensureBoardTeam(tx, boardId)).id
+    await saveMembers(tx, teamId, team)
   }
   return ids
 }
@@ -361,10 +426,19 @@ function checklistFrom(input: { text: string; done: boolean }[], previous: CardR
 // --- Boards ---
 
 export async function listBoards(db: Db, user: User): Promise<ApiBoardSummary[]> {
-  const { rows } = await db.query<{ id: string; title: string; role: Role; updated_at: Date; card_count: string }>(
-    `select b.id, b.title, m.role, b.updated_at,
+  const { rows } = await db.query<{
+    id: string
+    title: string
+    role: Role
+    team_id: string | null
+    team_name: string | null
+    updated_at: Date
+    card_count: string
+  }>(
+    `select b.id, b.title, m.role, b.team_id, t.name as team_name, b.updated_at,
        (select count(*) from kanban.cards c where c.board_id = b.id) as card_count
      from kanban.board_members m join kanban.boards b on b.id = m.board_id
+       left join kanban.teams t on t.id = b.team_id
      where m.user_id = $1 order by lower(b.title), b.id`,
     [user.id],
   )
@@ -372,6 +446,8 @@ export async function listBoards(db: Db, user: User): Promise<ApiBoardSummary[]>
     id: r.id,
     title: r.title,
     role: r.role,
+    teamId: r.team_id,
+    teamName: r.team_name,
     cardCount: Number(r.card_count),
     updatedAt: iso(r.updated_at),
   }))
@@ -410,12 +486,18 @@ export async function createBoard(db: Db, user: User, input: NewBoardInput): Pro
   return loadBoard(db, boardId, 'owner')
 }
 
-export async function updateBoard(db: Db, user: User, boardId: string, patch: { title?: string }) {
+export async function updateBoard(
+  db: Db,
+  user: User,
+  boardId: string,
+  patch: { title?: string; teamId?: string | null },
+) {
   const role = await db.transaction(async (tx) => {
     const role = await requireRole(tx, boardId, user.id, canEdit)
     if (patch.title !== undefined) {
       await tx.query('update kanban.boards set title = $2 where id = $1', [boardId, patch.title])
     }
+    if (patch.teamId !== undefined) await moveBoardToTeam(tx, user, boardId, patch.teamId)
     return role
   })
   return loadBoard(db, boardId, role)
@@ -648,8 +730,7 @@ async function requestAssignment(
   wanted: string[],
   current: string[],
 ) {
-  const { rows } = await tx.query<{ team: TeamMember[] }>('select team from kanban.boards where id = $1', [boardId])
-  const team = rows[0]?.team ?? []
+  const team = (await boardTeam(tx, boardId)).members
   const people: ApiPendingAssignment['assignees'] = []
   for (const want of wanted) {
     const member = findMember(team, want)
@@ -694,8 +775,7 @@ export async function approveAssignment(db: Db, user: User, boardId: string, car
       [cardId, boardId],
     )
     if (!rows[0]) fail(404, 'No assignment is waiting for that card')
-    const team = (await tx.query<{ team: TeamMember[] }>('select team from kanban.boards where id = $1', [boardId]))
-      .rows[0].team
+    const team = (await boardTeam(tx, boardId)).members
     // People still on the team by id; anyone removed since then is matched (or added) by name.
     const refs = rows[0].assignees.map((p) => (p.id && team.some((m) => m.id === p.id) ? p.id : p.name))
     const ids = await resolveAssignees(tx, boardId, refs)
@@ -800,7 +880,7 @@ export async function findCards(db: Db, user: User, query: CardQuery): Promise<A
   if (query.assignee?.toLowerCase() === 'none') where.push(`jsonb_array_length(c.assignee_ids) = 0`)
   else if (query.assignee) {
     const p = param(query.assignee)
-    where.push(`exists (select 1 from jsonb_array_elements(b.team) m
+    where.push(`exists (select 1 from jsonb_array_elements(coalesce(t.members, '[]'::jsonb)) m
       where (m->>'id' = ${p} or lower(m->>'name') = lower(${p})) and c.assignee_ids @> jsonb_build_array(m->>'id'))`)
   }
   if (query.interfaces) where.push(`c.spec is not null`)
@@ -812,10 +892,11 @@ export async function findCards(db: Db, user: User, query: CardQuery): Promise<A
     where.push(`(c.title ilike ${p} or c.description ilike ${p} or c.checklist::text ilike ${p} or c.progress_log::text ilike ${p} or coalesce(c.spec::text, '') ilike ${p})`)
   }
   const { rows } = await db.query<CardDbRow & { column_title: string; labels: ApiLabel[]; team: TeamMember[] }>(
-    `select c.*, col.title as column_title, b.labels, b.team
+    `select c.*, col.title as column_title, b.labels, coalesce(t.members, '[]'::jsonb) as team
      from kanban.cards c
      join kanban.board_members m on m.board_id = c.board_id and m.user_id = $1
      join kanban.boards b on b.id = c.board_id
+     left join kanban.teams t on t.id = b.team_id
      join kanban.columns col on col.id = c.column_id
      ${where.length ? `where ${where.join(' and ')}` : ''}
      order by lower(b.title), b.id, col.position, col.id, c.position, c.id
@@ -830,29 +911,182 @@ export async function findCards(db: Db, user: User, query: CardQuery): Promise<A
   )
 }
 
-// --- Team and workload ---
+// --- Teams and workload ---
+
+/** Where a team member lives: the team of a board, or a team named by id. */
+export type TeamTarget = { boardId: string } | { teamId: string }
+
+/** The team to change, locked, after checking the caller may change it. A board without a team gets one. */
+async function editableTeam(tx: Queryable, user: User, target: TeamTarget): Promise<{ id: string; members: TeamMember[] }> {
+  if ('boardId' in target) {
+    await requireRole(tx, target.boardId, user.id, canEdit)
+    return ensureBoardTeam(tx, target.boardId)
+  }
+  await requireTeamRole(tx, target.teamId, user.id, canEdit)
+  const { rows } = await tx.query<{ members: TeamMember[] }>('select members from kanban.teams where id = $1 for update', [
+    target.teamId,
+  ])
+  return { id: target.teamId, members: rows[0].members }
+}
 
 /**
- * Add a team member to a board, or change one. `member` is an id or a name;
- * a name the board doesn't have yet adds that person.
+ * Put a board in a team, or take it out of one (null). The people its cards
+ * are assigned to come along: matched in the new team by id or name, and
+ * added to it when it doesn't have them. Without a team, cards lose their
+ * assignees. Changing the team needs the right to change the new one.
+ */
+async function moveBoardToTeam(tx: Queryable, user: User, boardId: string, teamId: string | null) {
+  const current = await boardTeam(tx, boardId, true)
+  if (current.id === teamId) return
+  let target: TeamMember[] = []
+  if (teamId) {
+    await requireTeamRole(tx, teamId, user.id, canEdit)
+    target = (await tx.query<{ members: TeamMember[] }>('select members from kanban.teams where id = $1 for update', [teamId]))
+      .rows[0].members
+  }
+  const { rows: cards } = await tx.query<{ id: string; assignee_ids: string[] }>(
+    "select id, assignee_ids from kanban.cards where board_id = $1 and jsonb_array_length(assignee_ids) > 0",
+    [boardId],
+  )
+  const carried = teamId
+    ? carryMembers(current.members, target, cards.flatMap((c) => c.assignee_ids))
+    : { members: [], map: new Map<string, string>() }
+  const now = Date.now()
+  for (const card of cards) {
+    const ids = remapIds(card.assignee_ids.filter((id) => carried.map.has(id)), carried.map)
+    if (ids.join() !== card.assignee_ids.join()) {
+      await tx.query('update kanban.cards set assignee_ids = $2, updated_at = $3 where id = $1', [
+        card.id,
+        JSON.stringify(ids),
+        now,
+      ])
+    }
+  }
+  if (teamId && carried.members.length !== target.length) await saveMembers(tx, teamId, carried.members)
+  await tx.query('update kanban.boards set team_id = $2 where id = $1', [boardId, teamId])
+}
+
+type TeamDbRow = {
+  id: string
+  name: string
+  members: TeamMember[]
+  role: Role
+  created_at: string | number
+  updated_at: Date
+}
+
+/** Teams the user can see: ones they own, and the teams of boards they are on. */
+async function visibleTeams(db: Queryable, user: User, teamId?: string): Promise<TeamDbRow[]> {
+  const { rows } = await db.query<TeamDbRow>(
+    `select t.id, t.name, t.members, t.created_at, t.updated_at,
+       case when t.owner_id = $1 then 'owner'
+         when exists (select 1 from kanban.boards b join kanban.board_members m on m.board_id = b.id
+           where b.team_id = t.id and m.user_id = $1 and m.role in ('owner', 'editor')) then 'editor'
+         else 'viewer' end as role
+     from kanban.teams t
+     where (t.owner_id = $1 or exists (select 1 from kanban.boards b join kanban.board_members m on m.board_id = b.id
+       where b.team_id = t.id and m.user_id = $1))
+       ${teamId ? 'and t.id = $2' : ''}
+     order by lower(t.name), t.id`,
+    teamId ? [user.id, teamId] : [user.id],
+  )
+  return rows
+}
+
+/** The boards in a team that the user can see, by title. */
+async function teamBoards(db: Queryable, user: User, teamId: string | null) {
+  const { rows } = await db.query<{ id: string; title: string; team_id: string }>(
+    `select b.id, b.title, b.team_id from kanban.boards b join kanban.board_members m on m.board_id = b.id and m.user_id = $1
+     where ${teamId ? 'b.team_id = $2' : 'b.team_id is not null'} order by lower(b.title), b.id`,
+    teamId ? [user.id, teamId] : [user.id],
+  )
+  return rows
+}
+
+/** Teams the user can see, with their members and boards. */
+export async function listTeams(db: Db, user: User): Promise<ApiTeam[]> {
+  const [teams, boards] = await Promise.all([visibleTeams(db, user), teamBoards(db, user, null)])
+  return teams.map((t) => ({
+    id: t.id,
+    name: t.name,
+    role: t.role,
+    members: t.members,
+    boards: boards.filter((b) => b.team_id === t.id).map((b) => ({ id: b.id, title: b.title })),
+    createdAt: iso(t.created_at),
+    updatedAt: iso(t.updated_at),
+  }))
+}
+
+/** The same teams, as the app syncs them. */
+export async function teamRows(db: Db, user: User): Promise<TeamSummary[]> {
+  const teams = await visibleTeams(db, user)
+  return teams.map((t) => ({ id: t.id, name: t.name, members: t.members, created_at: Number(t.created_at), role: t.role }))
+}
+
+export async function getTeam(db: Db, user: User, teamId: string): Promise<ApiTeam> {
+  return (await listTeams(db, user)).find((t) => t.id === teamId) ?? fail(404, 'Team not found')
+}
+
+/** Start a team, owned by the caller, optionally with its first members. */
+export async function createTeam(
+  db: Db,
+  user: User,
+  input: { name: string; members: TeamMemberInput[] },
+): Promise<ApiTeam> {
+  const id = randomUUID()
+  const members: TeamMember[] = []
+  for (const m of input.members) {
+    const name = m.name!
+    if (members.some((x) => x.name.toLowerCase() === name.toLowerCase())) fail(409, `${name} is in the list twice`)
+    members.push({
+      id: randomUUID(),
+      name,
+      color: m.color ?? labelColors[members.length % labelColors.length],
+      capacity: m.capacity ?? 0,
+    })
+  }
+  await db.query('insert into kanban.teams (id, owner_id, name, members, created_at) values ($1, $2, $3, $4, $5)', [
+    id,
+    user.id,
+    input.name,
+    JSON.stringify(members),
+    Date.now(),
+  ])
+  return getTeam(db, user, id)
+}
+
+/** The team's owner deletes it: its boards stay, without a team, and their cards lose their assignees. */
+export async function deleteTeam(db: Db, user: User, teamId: string) {
+  await db.transaction(async (tx) => {
+    await requireTeamRole(tx, teamId, user.id, ['owner'])
+    await tx.query(
+      `update kanban.cards set assignee_ids = '[]'::jsonb
+       where board_id in (select id from kanban.boards where team_id = $1) and jsonb_array_length(assignee_ids) > 0`,
+      [teamId],
+    )
+    await tx.query('delete from kanban.teams where id = $1', [teamId])
+  })
+}
+
+/**
+ * Add a member to a team (a board's, or one named by id), or change one.
+ * `member` is an id or a name; a name the team doesn't have yet adds that
+ * person. A board without a team gets one.
  */
 export async function setTeamMember(
   db: Db,
   user: User,
-  boardId: string,
+  target: TeamTarget,
   member: string,
   input: TeamMemberInput,
 ): Promise<TeamMember> {
   return db.transaction(async (tx) => {
-    await requireRole(tx, boardId, user.id, canEdit)
-    const { rows } = await tx.query<{ team: TeamMember[] }>('select team from kanban.boards where id = $1 for update', [
-      boardId,
-    ])
-    const team = [...(rows[0]?.team ?? [])]
+    const current = await editableTeam(tx, user, target)
+    const team = [...current.members]
     const existing = findMember(team, member)
     const name = input.name ?? existing?.name ?? member
     const clash = team.find((m) => m !== existing && m.name.toLowerCase() === name.toLowerCase())
-    if (clash) fail(409, `${clash.name} is already on this board's team`)
+    if (clash) fail(409, `${clash.name} is already on this team`)
     const next: TeamMember = {
       id: existing?.id ?? randomUUID(),
       name,
@@ -861,67 +1095,86 @@ export async function setTeamMember(
     }
     if (existing) team[team.indexOf(existing)] = next
     else team.push(next)
-    await tx.query('update kanban.boards set team = $2 where id = $1', [boardId, JSON.stringify(team)])
+    await saveMembers(tx, current.id, team)
     return next
   })
 }
 
-/** Take someone off a board's team and off every card they were assigned to. */
-export async function removeTeamMember(db: Db, user: User, boardId: string, member: string) {
+/** Take someone off a team, and off every card on the team's boards. */
+export async function removeTeamMember(db: Db, user: User, target: TeamTarget, member: string) {
   await db.transaction(async (tx) => {
-    await requireRole(tx, boardId, user.id, canEdit)
-    const { rows } = await tx.query<{ team: TeamMember[] }>('select team from kanban.boards where id = $1 for update', [
-      boardId,
-    ])
-    const team = rows[0]?.team ?? []
-    const existing = findMember(team, member) ?? fail(404, `Team member "${member}" not found on this board`)
-    await tx.query('update kanban.boards set team = $2 where id = $1', [
-      boardId,
-      JSON.stringify(team.filter((m) => m.id !== existing.id)),
-    ])
+    if ('boardId' in target) {
+      await requireRole(tx, target.boardId, user.id, canEdit)
+      if (!(await boardTeam(tx, target.boardId)).id) fail(404, `Team member "${member}" not found on this board`)
+    }
+    const current = await editableTeam(tx, user, target)
+    const existing = findMember(current.members, member) ?? fail(404, `Team member "${member}" not found on this team`)
+    await saveMembers(
+      tx,
+      current.id,
+      current.members.filter((m) => m.id !== existing.id),
+    )
     await tx.query(
       `update kanban.cards set assignee_ids = assignee_ids - $2::text
-       where board_id = $1 and assignee_ids @> jsonb_build_array($2::text)`,
-      [boardId, existing.id],
+       where board_id in (select id from kanban.boards where team_id = $1) and assignee_ids @> jsonb_build_array($2::text)`,
+      [current.id, existing.id],
     )
   })
 }
 
 /**
  * Who has what: each team member's open cards (not in a done column) against
- * their capacity, on one board or across every board the user can see. Across
- * boards, people with the same name count as one person.
+ * their capacity. For a team, across all its boards (that the caller can
+ * see); for a board, on that board; with neither, across every board the
+ * caller can see, where people with the same name on different teams count
+ * as one person.
  */
-export async function getWorkload(db: Db, user: User, boardId?: string): Promise<ApiWorkload> {
-  const ids = boardId
-    ? [await requireRole(db, boardId, user.id, canRead).then(() => boardId)]
-    : (await listBoards(db, user)).map((b) => b.id)
+export async function getWorkload(db: Db, user: User, scope: TeamTarget | Record<string, never> = {}): Promise<ApiWorkload> {
+  let team: { id: string; name: string; members: TeamMember[] } | null = null
+  let ids: string[]
+  if ('teamId' in scope) {
+    await requireTeamRole(db, scope.teamId, user.id, canRead)
+    const [row] = await visibleTeams(db, user, scope.teamId)
+    team = { id: row.id, name: row.name, members: row.members }
+    ids = (await teamBoards(db, user, scope.teamId)).map((b) => b.id)
+  } else if ('boardId' in scope) {
+    await requireRole(db, scope.boardId, user.id, canRead)
+    ids = [scope.boardId]
+  } else {
+    ids = (await listBoards(db, user)).map((b) => b.id)
+  }
   const boards = await Promise.all(ids.map((id) => loadBoard(db, id, 'viewer')))
   type Item = ApiWorkloadCard & { assigneeIds: string[] }
-  const workloads: Workload<Item>[] = boards.map((board) =>
-    computeWorkload(
-      board.team,
-      board.columns.flatMap((col) =>
-        col.cards.map((card) => ({
-          done: isDoneColumn(col.title),
-          card: {
-            id: card.id,
-            title: card.title,
-            boardId: board.id,
-            board: board.title,
-            column: col.title,
-            priority: card.priority,
-            dueDate: card.dueDate,
-            progress: card.progress,
-            assigneeIds: card.assignees.map((a) => a.id),
-          },
-        })),
-      ),
-    ),
+  const itemsOf = (board: ApiBoard) =>
+    board.columns.flatMap((col) =>
+      col.cards.map((card) => ({
+        done: isDoneColumn(col.title),
+        card: {
+          id: card.id,
+          title: card.title,
+          boardId: board.id,
+          board: board.title,
+          column: col.title,
+          priority: card.priority,
+          dueDate: card.dueDate,
+          progress: card.progress,
+          assigneeIds: card.assignees.map((a) => a.id),
+        },
+      })),
+    )
+  // Boards in one team share its people; each team (or board without one) is worked out once.
+  const groups = new Map<string, ApiBoard[]>()
+  for (const board of boards) {
+    const key = team ? team.id : (board.teamId ?? `board:${board.id}`)
+    groups.set(key, [...(groups.get(key) ?? []), board])
+  }
+  const workloads: Workload<Item>[] = [...groups.values()].map((list) =>
+    computeWorkload(team?.members ?? list[0].team, list.flatMap(itemsOf)),
   )
-  const workload = boardId ? workloads[0] : mergeWorkloads(workloads)
+  const workload = workloads.length === 1 ? workloads[0] : mergeWorkloads(workloads)
   const strip = ({ assigneeIds: _a, ...card }: Item): ApiWorkloadCard => card
   return {
+    team: team && { id: team.id, name: team.name },
     boards: boards.map((b) => ({ id: b.id, title: b.title })),
     members: workload.members.map((m) => ({
       memberIds: m.memberIds,

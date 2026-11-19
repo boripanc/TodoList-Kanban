@@ -1,4 +1,4 @@
-import type { BoardOps, BoardRow, CardRow, ColumnRow } from '../../src/cloud/doc.ts'
+import type { BoardOps, BoardRow, CardRow, ColumnRow, TeamRow } from '../../src/cloud/doc.ts'
 import type { InterfaceSpec, ProgressEntry, TeamMember } from '../../src/types.ts'
 import { adapterTypes, messageModes, SPEC_TEXT_MAX, specFields, specStatuses } from '../../src/lib/interfaces.ts'
 import type { ContactInput, CredentialField, CredentialInput } from '../../src/cloud/api.ts'
@@ -122,9 +122,27 @@ export function boardRow(value: unknown): BoardRow {
     id: id(b.id, 'board id'),
     title: str(b.title, 'title'),
     labels: labels(b.labels),
-    // Apps from before teams existed leave it out; the database then keeps what it has.
-    ...(b.team === undefined ? {} : { team: team(b.team) }),
+    // Apps from before teams of their own existed leave it out (and may send the
+    // board's old team, which is no longer kept); the database keeps what it has.
+    ...teamIdField(b.team_id),
     created_at: int(b.created_at, 'created_at'),
+  }
+}
+
+function teamIdField(value: unknown): { team_id?: string | null } {
+  if (value === undefined) return {}
+  return { team_id: value === null ? null : id(value, 'team_id') }
+}
+
+/** A whole team from the app: its name and members. */
+export function teamRow(value: unknown, teamId: string): TeamRow {
+  const t = obj(value, 'team')
+  if (t.id !== undefined && t.id !== teamId) throw new BadRequest('The team id does not match the address')
+  return {
+    id: id(teamId, 'team id'),
+    name: title(t.name, 'team name', 100),
+    members: team(t.members),
+    created_at: int(t.created_at, 'created_at'),
   }
 }
 
@@ -199,7 +217,7 @@ export function boardOps(value: unknown, boardId: string): BoardOps {
     board: board && {
       title: str(board.title, 'title'),
       labels: labels(board.labels),
-      ...(board.team === undefined ? {} : { team: team(board.team) }),
+      ...teamIdField(board.team_id),
     },
     upsertColumns: arr(o.upsertColumns ?? [], 'upsertColumns').map((c) => columnRow(c, boardId)),
     deleteColumnIds: arr(o.deleteColumnIds ?? [], 'deleteColumnIds').map((c) => id(c, 'column id')),
@@ -347,9 +365,25 @@ export function newBoardInput(value: unknown): NewBoardInput {
   }
 }
 
-export function boardPatchInput(value: unknown): { title?: string } {
+export function boardPatchInput(value: unknown): { title?: string; teamId?: string | null } {
   const b = obj(value, 'board')
-  return { title: optional(b.title, (v) => title(v, 'title')) }
+  return {
+    title: optional(b.title, (v) => title(v, 'title')),
+    ...(b.teamId === undefined ? {} : { teamId: b.teamId === null ? null : id(b.teamId, 'teamId') }),
+  }
+}
+
+/** A new team: its name, and optionally its first members. */
+export function newTeamInput(value: unknown): { name: string; members: TeamMemberInput[] } {
+  const t = obj(value, 'team')
+  return {
+    name: title(t.name, 'name', 100),
+    members: arr(t.members ?? [], 'members', 200).map((m) => {
+      const member = teamMemberInput(m)
+      if (!member.name) throw new BadRequest('Each member needs a name')
+      return member
+    }),
+  }
 }
 
 export function columnInput(value: unknown, isNew: boolean): ColumnInput {

@@ -1,7 +1,7 @@
 import type { AppState, Role } from '../types'
 import type { Action } from '../state/reducer'
 import type { CloudApi } from './api'
-import { diffBoardDoc, extractBoardDoc, isEmptyOps, type BoardDoc } from './doc'
+import { diffBoardDoc, extractBoardDoc, isEmptyOps, teamFromRow, teamRow, type BoardDoc, type TeamRow } from './doc'
 
 /**
  * Keeps cloud boards in step with the server.
@@ -15,11 +15,19 @@ import { diffBoardDoc, extractBoardDoc, isEmptyOps, type BoardDoc } from './doc'
  * Boards are only deleted on the server by an explicit `deleteBoard`; a board
  * that disappears locally for any other reason (sign-out, a backup import) is
  * simply no longer synced.
+ *
+ * Teams sync the same way, as whole rows: `publishTeam` and `deleteTeam` are
+ * explicit, `push` saves changed teams (before boards, so a board never
+ * points at a team the server doesn't have yet), and `refreshTeams` replaces
+ * the local copies.
  */
 export class CloudSync {
   /** What the server has, per board, as far as this device knows. */
   private synced = new Map<string, BoardDoc>()
   private updatedAt = new Map<string, string>()
+  /** What the server has, per team. */
+  private syncedTeams = new Map<string, TeamRow>()
+  private waitingTeams = false
   private queue: Promise<void> = Promise.resolve()
   private pending = 0
   private waitingRefresh = new Set<string>()
@@ -46,6 +54,7 @@ export class CloudSync {
     this.stopped = true
     this.synced.clear()
     this.updatedAt.clear()
+    this.syncedTeams.clear()
   }
 
   /** Writes still on their way to the server. */
@@ -60,6 +69,20 @@ export class CloudSync {
 
   /** Send local changes on cloud boards to the server. */
   push(state: AppState = this.getState()) {
+    for (const [teamId, prev] of this.syncedTeams) {
+      const team = state.teams[teamId]
+      if (!team?.cloud || team.cloud.role === 'viewer') continue
+      const next = teamRow(team)
+      if (JSON.stringify(prev) === JSON.stringify(next)) continue
+      this.syncedTeams.set(teamId, next)
+      this.enqueue(
+        () => this.api.saveTeam(next),
+        () => {
+          this.onError('A change to the team could not be saved. Reloading teams from the server.')
+          this.waitingTeams = true
+        },
+      )
+    }
     for (const [boardId, prev] of this.synced) {
       const board = state.boards[boardId]
       if (!board?.cloud || board.cloud.role === 'viewer') continue
@@ -92,6 +115,51 @@ export class CloudSync {
         this.onError(`"${doc.board.title}" could not be saved to your account. It is still on this device.`)
       },
     )
+  }
+
+  /** Save a team this user just created in the account. */
+  publishTeam(teamId: string) {
+    const team = this.getState().teams[teamId]
+    if (!team) return
+    const row = teamRow(team)
+    this.syncedTeams.set(teamId, row)
+    this.enqueue(
+      () => this.api.saveTeam(row),
+      () => {
+        this.onError(`The team "${row.name}" could not be saved to your account.`)
+        this.syncedTeams.delete(teamId)
+        this.waitingTeams = true
+      },
+    )
+  }
+
+  /** Delete a team for everyone. The caller removes it locally. */
+  deleteTeam(teamId: string) {
+    this.syncedTeams.delete(teamId)
+    this.enqueue(
+      () => this.api.deleteTeam(teamId),
+      () => {
+        this.onError('The team could not be deleted on the server.')
+        this.waitingTeams = true
+      },
+    )
+  }
+
+  /** Load the user's teams from the server in place of the local copies. */
+  async refreshTeams(): Promise<void> {
+    this.push()
+    if (this.pending > 0) {
+      this.waitingTeams = true
+      return
+    }
+    const list = await this.api.listTeams()
+    if (this.stopped) return
+    if (this.pending > 0) {
+      this.waitingTeams = true
+      return
+    }
+    this.syncedTeams = new Map(list.map(({ role: _role, ...row }) => [row.id, row]))
+    this.dispatch({ type: 'teams/load', teams: list.map(teamFromRow) })
   }
 
   /** Delete a board for everyone. The caller removes it locally. */
@@ -136,7 +204,7 @@ export class CloudSync {
       this.waitingRefreshAll = true
       return
     }
-    const summaries = await this.api.listBoards()
+    const [summaries] = await Promise.all([this.api.listBoards(), this.refreshTeams()])
     if (this.stopped) return
     const listed = new Set(summaries.map((s) => s.id))
     const state = this.getState()
@@ -172,6 +240,9 @@ export class CloudSync {
     }
     this.synced.set(doc.board.id, doc)
     this.dispatch({ type: 'board/load', doc, role })
+    // The board joined a team this device doesn't have yet.
+    const teamId = doc.board.teamId
+    if (teamId && !this.getState().teams[teamId]) void this.refreshTeams().catch(() => {})
   }
 
   private enqueue(write: () => Promise<void>, onFail: () => void) {
@@ -191,8 +262,13 @@ export class CloudSync {
   private drain() {
     const boards = [...this.waitingRefresh]
     this.waitingRefresh.clear()
+    if (this.waitingTeams && !this.waitingRefreshAll) {
+      this.waitingTeams = false
+      void this.refreshTeams().catch(() => {})
+    }
     if (this.waitingRefreshAll) {
       this.waitingRefreshAll = false
+      this.waitingTeams = false
       for (const id of boards) this.updatedAt.delete(id)
       void this.refreshAll().catch(() => {})
       return

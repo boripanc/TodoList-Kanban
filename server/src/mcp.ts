@@ -103,7 +103,15 @@ const spec = {
   description:
     'Technical spec when the card is an SAP CPI integration someone builds. Only the fields given change; a card without a spec gets one (idoc to http, async, draft by default). null removes the spec.',
 }
-const member = text('Team member name or id, from get_board (team).')
+const member = text('Team member name or id, from get_board (team) or list_teams (members).')
+const teamId = text('Team id, from list_teams.')
+
+/** A team named by teamId, or the team of boardId. */
+function teamTarget(a: Record<string, unknown>): k.TeamTarget {
+  if (a.teamId !== undefined) return { teamId: v.ref(a.teamId, 'teamId') }
+  if (a.boardId === undefined) throw new v.BadRequest('Give teamId or boardId')
+  return { boardId: v.ref(a.boardId, 'boardId') }
+}
 const cardFields = {
   title: text('Card title.'),
   description: text('Notes (plain text).'),
@@ -122,7 +130,8 @@ export const tools: Tool[] = [
   {
     name: 'list_boards',
     title: 'List boards',
-    description: 'List the boards you can see, with your role on each (owner, editor or viewer) and card counts.',
+    description:
+      'List the boards you can see, with your role on each (owner, editor or viewer), the team each belongs to, and card counts.',
     inputSchema: object({}),
     annotations: { readOnlyHint: true },
     run: (db, user) => k.listBoards(db, user),
@@ -130,7 +139,8 @@ export const tools: Tool[] = [
   {
     name: 'get_board',
     title: 'Get a board',
-    description: 'Get a board with its labels, its team, its columns in order and every card in each column.',
+    description:
+      "Get a board with its labels, its team (teamId, teamName, and the team's members), its columns in order and every card in each column.",
     inputSchema: object({ boardId }, ['boardId']),
     annotations: { readOnlyHint: true },
     run: (db, user, a) => k.getBoard(db, user, v.ref(a.boardId, 'boardId')),
@@ -160,6 +170,52 @@ export const tools: Tool[] = [
     inputSchema: object({ boardId, title: text('New title.') }, ['boardId', 'title']),
     annotations: { idempotentHint: true },
     run: (db, user, a) => k.updateBoard(db, user, v.ref(a.boardId, 'boardId'), v.boardPatchInput({ title: a.title })),
+  },
+  {
+    name: 'list_teams',
+    title: 'List teams',
+    description:
+      'List the teams you can see, with their members (name, color, capacity) and their boards. A team groups boards: cards on any of its boards are assigned to its members, and its workload covers all of them.',
+    inputSchema: object({}),
+    annotations: { readOnlyHint: true },
+    run: (db, user) => k.listTeams(db, user),
+  },
+  {
+    name: 'create_team',
+    title: 'Create a team',
+    description: 'Start a team that you own, optionally with its first members. Put boards in it with set_board_team.',
+    inputSchema: object(
+      {
+        name: text('Team name.'),
+        members: {
+          type: 'array',
+          items: object(
+            {
+              name: { type: 'string' },
+              color: text('Hex color like #0090ff (optional).'),
+              capacity: { type: 'integer', minimum: 0, maximum: 999, description: 'Open cards they can take on; 0 = no limit.' },
+            },
+            ['name'],
+          ),
+        },
+      },
+      ['name'],
+    ),
+    annotations: {},
+    run: (db, user, a) => k.createTeam(db, user, v.newTeamInput(a)),
+  },
+  {
+    name: 'set_board_team',
+    title: 'Put a board in a team',
+    description:
+      'Put a board in a team, or take it out of its team with teamId null. People its cards are assigned to join the new team if it lacks them; without a team, cards lose their assignees. Needs editor or owner role on the board and the right to change the team.',
+    inputSchema: object(
+      { boardId, teamId: { type: ['string', 'null'], description: 'Team id from list_teams, or null for no team.' } },
+      ['boardId', 'teamId'],
+    ),
+    annotations: { idempotentHint: true },
+    run: (db, user, a) =>
+      k.updateBoard(db, user, v.ref(a.boardId, 'boardId'), v.boardPatchInput({ teamId: a.teamId ?? null })),
   },
   {
     name: 'add_column',
@@ -295,40 +351,43 @@ export const tools: Tool[] = [
     name: 'get_workload',
     title: 'Get team workload',
     description:
-      'Who has what: each team member with their open cards (cards not in a done column), counts of overdue and soon-due cards, and load against their capacity (level: free, busy, full or over). Also lists open cards nobody is assigned to. Without boardId, covers every board you can see and joins people with the same name.',
-    inputSchema: object({ boardId: text('Only this board (optional).') }),
+      "Who has what: each team member with their open cards (cards not in a done column), counts of overdue and soon-due cards, and load against their capacity (level: free, busy, full or over). Also lists open cards nobody is assigned to. With teamId, covers all of that team's boards; with boardId, one board; with neither, every board you can see, joining people with the same name.",
+    inputSchema: object({ teamId: text('Only this team, across all its boards (optional).'), boardId: text('Only this board (optional).') }),
     annotations: { readOnlyHint: true },
-    run: (db, user, a) => k.getWorkload(db, user, a.boardId === undefined ? undefined : v.ref(a.boardId, 'boardId')),
+    run: (db, user, a) =>
+      k.getWorkload(db, user, a.teamId === undefined && a.boardId === undefined ? {} : teamTarget(a)),
   },
   {
     name: 'set_team_member',
     title: 'Add or change a team member',
     description:
-      'Add someone to a board team, or change their name, color or capacity (how many open cards they can take on; 0 = no limit). An unknown name adds that person.',
+      "Add someone to a team, or change their name, color or capacity (how many open cards they can take on across the team's boards; 0 = no limit). An unknown name adds that person. Name the team by teamId, or by a board (boardId) to use that board's team; a board without a team gets one.",
     inputSchema: object(
       {
-        boardId,
+        teamId,
+        boardId: text("A board whose team to change, instead of teamId."),
         member,
         name: text('New name (to rename).'),
         color: text('Hex color like #0090ff.'),
         capacity: { type: 'integer', minimum: 0, maximum: 999, description: 'Open cards they can take on; 0 = no limit.' },
       },
-      ['boardId', 'member'],
+      ['member'],
     ),
     annotations: { idempotentHint: true },
     run: (db, user, a) => {
-      const { boardId: id, member: who, ...rest } = a
-      return k.setTeamMember(db, user, v.ref(id, 'boardId'), v.ref(who, 'member'), v.teamMemberInput(rest))
+      const { boardId: _b, teamId: _t, member: who, ...rest } = a
+      return k.setTeamMember(db, user, teamTarget(a), v.ref(who, 'member'), v.teamMemberInput(rest))
     },
   },
   {
     name: 'remove_team_member',
     title: 'Remove a team member',
-    description: 'Take someone off a board team. They are also taken off every card on that board.',
-    inputSchema: object({ boardId, member }, ['boardId', 'member']),
+    description:
+      "Take someone off a team (by teamId, or a board's team by boardId). They are also taken off every card on the team's boards.",
+    inputSchema: object({ teamId, boardId: text("A board whose team to change, instead of teamId."), member }, ['member']),
     annotations: { destructiveHint: true },
     run: async (db, user, a) => {
-      await k.removeTeamMember(db, user, v.ref(a.boardId, 'boardId'), v.ref(a.member, 'member'))
+      await k.removeTeamMember(db, user, teamTarget(a), v.ref(a.member, 'member'))
       return { ok: true }
     },
   },
@@ -347,7 +406,7 @@ export const tools: Tool[] = [
 
 const INSTRUCTIONS =
   'TodoList Kanban boards. Start with list_boards, then get_board to see columns and cards. ' +
-  'Columns can be named by title. Cards can be assigned to the board team by name, but each assignment waits for the board owner to approve it in the app (see pendingAssignment on the card); get_workload shows who has what. ' +
+  'Columns can be named by title. Boards belong to teams (list_teams); cards can be assigned to the board team by name, but each assignment waits for the board owner to approve it in the app (see pendingAssignment on the card); get_workload with a teamId shows who has what across all the team\'s boards. ' +
   'You act as the owner of the API key: viewers can only read.'
 
 type Message = { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown }

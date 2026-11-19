@@ -24,6 +24,15 @@ const boardId = pathParam('boardId', 'Board id')
 const column = pathParam('column', 'Column id or title')
 const cardId = pathParam('cardId', 'Card id')
 const member = pathParam('member', 'Team member id or name')
+const teamId = pathParam('teamId', 'Team id')
+const memberBody = body({
+  type: 'object',
+  properties: {
+    name: { type: 'string', description: 'New name (to rename)' },
+    color: { type: 'string', example: '#0090ff' },
+    capacity: { type: 'integer', minimum: 0, maximum: 999, description: 'Open cards they can take on; 0 = no limit' },
+  },
+})
 const query = (name: string, description: string, schema: object = { type: 'string' }) => ({
   name,
   in: 'query',
@@ -159,9 +168,14 @@ export function openApiSpec() {
         parameters: [boardId],
         get: { summary: 'Get a board with columns and cards', operationId: 'getBoard', responses: { 200: json(ref('Board')), ...errors } },
         patch: {
-          summary: 'Rename a board',
+          summary: 'Rename a board, or put it in a team',
+          description:
+            'teamId puts the board in that team (null: no team). People its cards are assigned to join the new team if it lacks them; without a team, cards lose their assignees. Changing the team needs the right to change the new one.',
           operationId: 'updateBoard',
-          requestBody: body({ type: 'object', properties: { title: { type: 'string' } } }),
+          requestBody: body({
+            type: 'object',
+            properties: { title: { type: 'string' }, teamId: { type: 'string', nullable: true } },
+          }),
           responses: { 200: json(ref('Board')), ...errors },
         },
         delete: { summary: 'Delete a board (owner only)', operationId: 'deleteBoard', responses: { 200: ok, ...errors } },
@@ -169,22 +183,16 @@ export function openApiSpec() {
       '/boards/{boardId}/team/{member}': {
         parameters: [boardId, member],
         put: {
-          summary: 'Add or change a team member',
-          description: 'An unknown name adds that person. Fields left out stay as they are.',
+          summary: "Add or change a member of the board's team",
+          description:
+            "An unknown name adds that person. Fields left out stay as they are. A board without a team gets one, named after it.",
           operationId: 'setTeamMember',
-          requestBody: body({
-            type: 'object',
-            properties: {
-              name: { type: 'string', description: 'New name (to rename)' },
-              color: { type: 'string', example: '#0090ff' },
-              capacity: { type: 'integer', minimum: 0, maximum: 999, description: 'Open cards they can take on; 0 = no limit' },
-            },
-          }),
+          requestBody: memberBody,
           responses: { 200: json(ref('TeamMember')), ...errors },
         },
         delete: {
-          summary: 'Remove a team member',
-          description: 'Also takes them off every card on the board.',
+          summary: "Remove a member of the board's team",
+          description: "Also takes them off every card on the team's boards.",
           operationId: 'removeTeamMember',
           responses: { 200: ok, ...errors },
         },
@@ -200,8 +208,74 @@ export function openApiSpec() {
       '/workload': {
         get: {
           summary: 'Workload across all your boards',
-          description: 'People with the same name on different boards count as one person; capacities add up.',
+          description: 'People with the same name on different teams count as one person; capacities add up.',
           operationId: 'getWorkload',
+          responses: { 200: json(ref('Workload')), ...errors },
+        },
+      },
+      '/teams': {
+        get: {
+          summary: 'List teams you can see',
+          description: 'Teams you own, and the teams of boards you are on, with their members and boards.',
+          operationId: 'listTeams',
+          responses: { 200: json({ type: 'array', items: ref('Team') }), 401: errors[401] },
+        },
+        post: {
+          summary: 'Create a team',
+          operationId: 'createTeam',
+          requestBody: body({
+            type: 'object',
+            required: ['name'],
+            properties: {
+              name: { type: 'string' },
+              members: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['name'],
+                  properties: {
+                    name: { type: 'string' },
+                    color: { type: 'string', example: '#0090ff' },
+                    capacity: { type: 'integer', minimum: 0, maximum: 999 },
+                  },
+                },
+              },
+            },
+          }),
+          responses: { 201: json(ref('Team'), 'Created'), ...errors },
+        },
+      },
+      '/teams/{teamId}': {
+        parameters: [teamId],
+        get: { summary: 'Get a team', operationId: 'getTeam', responses: { 200: json(ref('Team')), ...errors } },
+        delete: {
+          summary: 'Delete a team (owner only)',
+          description: 'Its boards stay, without a team, and their cards lose their assignees.',
+          operationId: 'deleteTeam',
+          responses: { 200: ok, ...errors },
+        },
+      },
+      '/teams/{teamId}/members/{member}': {
+        parameters: [teamId, member],
+        put: {
+          summary: 'Add or change a team member',
+          description: 'An unknown name adds that person. Fields left out stay as they are.',
+          operationId: 'setTeamMemberOfTeam',
+          requestBody: memberBody,
+          responses: { 200: json(ref('TeamMember')), ...errors },
+        },
+        delete: {
+          summary: 'Remove a team member',
+          description: "Also takes them off every card on the team's boards.",
+          operationId: 'removeTeamMemberOfTeam',
+          responses: { 200: ok, ...errors },
+        },
+      },
+      '/teams/{teamId}/workload': {
+        parameters: [teamId],
+        get: {
+          summary: "Each team member's open cards and load across all the team's boards",
+          operationId: 'getTeamWorkload',
           responses: { 200: json(ref('Workload')), ...errors },
         },
       },
@@ -376,9 +450,31 @@ export function openApiSpec() {
             progress: { type: 'integer', nullable: true },
           },
         },
+        Team: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            name: { type: 'string' },
+            role: ref('Role'),
+            members: { type: 'array', items: ref('TeamMember') },
+            boards: {
+              type: 'array',
+              description: 'Its boards that you can see',
+              items: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' } } },
+            },
+            createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time' },
+          },
+        },
         Workload: {
           type: 'object',
           properties: {
+            team: {
+              type: 'object',
+              nullable: true,
+              description: "The team, for a team's workload",
+              properties: { id: { type: 'string' }, name: { type: 'string' } },
+            },
             boards: {
               type: 'array',
               items: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' } } },
@@ -410,6 +506,8 @@ export function openApiSpec() {
             id: { type: 'string' },
             title: { type: 'string' },
             role: ref('Role'),
+            teamId: { type: 'string', nullable: true },
+            teamName: { type: 'string', nullable: true },
             cardCount: { type: 'integer' },
             updatedAt: { type: 'string', format: 'date-time' },
           },
@@ -421,7 +519,9 @@ export function openApiSpec() {
             title: { type: 'string' },
             role: ref('Role'),
             labels: { type: 'array', items: ref('Label') },
-            team: { type: 'array', items: ref('TeamMember') },
+            teamId: { type: 'string', nullable: true },
+            teamName: { type: 'string', nullable: true },
+            team: { type: 'array', items: ref('TeamMember'), description: "The team's members" },
             createdAt: { type: 'string', format: 'date-time' },
             updatedAt: { type: 'string', format: 'date-time' },
             columns: { type: 'array', items: ref('Column') },
