@@ -1,21 +1,23 @@
 import { useState } from 'react'
 import type { AssignmentRequest } from '../cloud/api'
 import type { Cloud } from '../cloud/context'
-import type { Board, Card } from '../types'
+import type { Board, Card, TeamMember } from '../types'
+import { useStore } from '../state/context'
+import { boardMembers } from '../lib/teams'
 import { Modal } from './Modal'
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many)
 
 /** "Kim, Lee (new)" or "nobody", for who a request would assign. */
-function requestedPeople(request: AssignmentRequest, board: Board): string {
+function requestedPeople(request: AssignmentRequest, team: TeamMember[]): string {
   if (request.assignees.length === 0) return 'nobody'
   return request.assignees
-    .map((p) => (p.id && board.team.some((m) => m.id === p.id) ? p.name : `${p.name} (new to the team)`))
+    .map((p) => (p.id && team.some((m) => m.id === p.id) ? p.name : `${p.name} (new to the team)`))
     .join(', ')
 }
 
-function currentPeople(card: Card | undefined, board: Board): string {
-  const names = (card?.assigneeIds ?? []).flatMap((id) => board.team.find((m) => m.id === id)?.name ?? [])
+function currentPeople(card: Card | undefined, team: TeamMember[]): string {
+  const names = (card?.assigneeIds ?? []).flatMap((id) => team.find((m) => m.id === id)?.name ?? [])
   return names.length ? names.join(', ') : 'nobody'
 }
 
@@ -94,6 +96,7 @@ export function AssignmentsDialog({
   const owner = board.cloud?.role === 'owner'
   const actions = useAct(cloud)
   const requests = cloud.assignmentRequests
+  const team = boardMembers(useStore().state, board)
   return (
     <Modal title="Assignments to approve" onClose={onClose}>
       <h2>Assignments to approve</h2>
@@ -119,10 +122,10 @@ export function AssignmentsDialog({
                     <strong>{title}</strong>
                   )}
                   <span>
-                    Assign to <strong>{requestedPeople(request, board)}</strong>
+                    Assign to <strong>{requestedPeople(request, team)}</strong>
                   </span>
                   <small className="muted">
-                    Now: {currentPeople(card, board)} · asked {request.requestedBy ? `by ${request.requestedBy} ` : ''}
+                    Now: {currentPeople(card, team)} · asked {request.requestedBy ? `by ${request.requestedBy} ` : ''}
                     {when(request.requestedAt)}
                   </small>
                 </div>
@@ -139,13 +142,14 @@ export function AssignmentsDialog({
 /** In the card dialog: the assignment waiting on this card, if any. */
 export function PendingAssignment({ cloud, board, card }: { cloud: Cloud | null; board: Board; card: Card }) {
   const actions = useAct(cloud)
+  const team = boardMembers(useStore().state, board)
   const request = cloud?.assignmentRequests.find((r) => r.cardId === card.id)
   if (!cloud || !request) return null
   const owner = board.cloud?.role === 'owner'
   return (
     <div className="pending-assign" role="status">
       <span>
-        Waiting for approval: assign to <strong>{requestedPeople(request, board)}</strong>
+        Waiting for approval: assign to <strong>{requestedPeople(request, team)}</strong>
         {request.requestedBy && <small className="muted"> · asked by {request.requestedBy}</small>}
       </span>
       {owner && (

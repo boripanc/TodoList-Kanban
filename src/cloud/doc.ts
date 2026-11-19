@@ -1,4 +1,4 @@
-import type { AppState, Board, Card, Column, InterfaceSpec, Label, Priority, Role, TeamMember } from '../types'
+import type { AppState, Board, Card, Column, InterfaceSpec, Label, Priority, Role, Team, TeamMember } from '../types'
 
 /** One board with its columns and cards, as stored in the cloud. */
 export interface BoardDoc {
@@ -11,9 +11,33 @@ export interface BoardRow {
   id: string
   title: string
   labels: Label[]
-  /** Left out by apps from before teams existed; the server then keeps what it has. */
-  team?: TeamMember[]
+  /**
+   * The team the board belongs to. Left out by apps from before teams of
+   * their own existed; the server then keeps what it has.
+   */
+  team_id?: string | null
   created_at: number
+}
+
+/** A team as stored in the cloud. */
+export interface TeamRow {
+  id: string
+  name: string
+  members: TeamMember[]
+  created_at: number
+}
+
+/** A team in the account, with the user's role on it. */
+export interface TeamSummary extends TeamRow {
+  role: Role
+}
+
+export function teamRow(team: Team): TeamRow {
+  return { id: team.id, name: team.name, members: team.members, created_at: team.createdAt }
+}
+
+export function teamFromRow(row: TeamSummary): Omit<Team, 'cloud'> & { role: Role } {
+  return { id: row.id, name: row.name, members: row.members, createdAt: row.created_at, role: row.role }
 }
 
 export interface ColumnRow {
@@ -52,7 +76,7 @@ export interface CardRow {
 
 /** The writes that turn one version of a board into another. */
 export interface BoardOps {
-  board?: Pick<BoardRow, 'title' | 'labels' | 'team'>
+  board?: Pick<BoardRow, 'title' | 'labels' | 'team_id'>
   upsertColumns: ColumnRow[]
   deleteColumnIds: string[]
   upsertCards: CardRow[]
@@ -73,7 +97,7 @@ export function boardRow(doc: BoardDoc): BoardRow {
     id: doc.board.id,
     title: doc.board.title,
     labels: doc.board.labels,
-    team: doc.board.team,
+    team_id: doc.board.teamId,
     created_at: doc.board.createdAt,
   }
 }
@@ -161,7 +185,7 @@ export function docFromRows(board: BoardRow, columnRowList: ColumnRow[], cardRow
       id: board.id,
       title: board.title,
       labels: board.labels,
-      team: board.team ?? [],
+      teamId: board.team_id ?? null,
       createdAt: board.created_at,
       columnIds: docColumns.map((c) => c.id),
     },
@@ -178,9 +202,9 @@ export function diffBoardDoc(prev: BoardDoc, next: BoardDoc): BoardOps {
   if (
     prev.board.title !== next.board.title ||
     !same(prev.board.labels, next.board.labels) ||
-    !same(prev.board.team, next.board.team)
+    prev.board.teamId !== next.board.teamId
   ) {
-    ops.board = { title: next.board.title, labels: next.board.labels, team: next.board.team }
+    ops.board = { title: next.board.title, labels: next.board.labels, team_id: next.board.teamId }
   }
 
   const prevColumns = new Map(columnRows(prev).map((row) => [row.id, row]))

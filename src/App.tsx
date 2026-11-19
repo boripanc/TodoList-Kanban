@@ -22,6 +22,7 @@ import { AssignmentNotice, AssignmentsDialog } from './components/Assignments'
 import { roleName } from './cloud/api'
 import { useCloud } from './cloud/context'
 import { findBoardOfCard, isReadOnly } from './state/reducer'
+import { sortedTeams, teamBoardIds } from './lib/teams'
 
 export default function App() {
   const { state, dispatch } = useStore()
@@ -68,6 +69,12 @@ export default function App() {
       </option>
     )
   }
+  // Boards are listed under their teams once there are any.
+  const teamGroups = sortedTeams(state)
+    .map((team) => ({ team, ids: teamBoardIds(state, team.id) }))
+    .filter((g) => g.ids.length > 0)
+  const teamless = state.boardOrder.filter((id) => state.boards[id] && !state.teams[state.boards[id].teamId ?? ''])
+  const team = board?.teamId ? state.teams[board.teamId] : undefined
   // Filters belong to one board; switching boards starts unfiltered.
   const filter = filterState.boardId === boardId ? filterState.filter : emptyFilter
   const setFilter = (next: CardFilter) => setFilterState({ boardId, filter: next })
@@ -116,7 +123,16 @@ export default function App() {
             value={board.id}
             onChange={(e) => dispatch({ type: 'board/select', boardId: e.target.value })}
           >
-            {cloudIds.length > 0 ? (
+            {teamGroups.length > 0 ? (
+              <>
+                {teamGroups.map(({ team: t, ids }) => (
+                  <optgroup key={t.id} label={t.name}>
+                    {ids.map(boardOption)}
+                  </optgroup>
+                ))}
+                {teamless.length > 0 && <optgroup label="No team">{teamless.map(boardOption)}</optgroup>}
+              </>
+            ) : cloudIds.length > 0 ? (
               <>
                 <optgroup label="On this device">{localIds.map(boardOption)}</optgroup>
                 <optgroup label="In my account">{cloudIds.map(boardOption)}</optgroup>
@@ -150,7 +166,11 @@ export default function App() {
                 }}
               />
             </div>
-            <button className="button" onClick={() => setDialog('team')} title="Team and workload (W)">
+            <button
+              className="button"
+              onClick={() => setDialog('team')}
+              title={team ? `${team.name}: team and workload (W)` : 'Team and workload (W)'}
+            >
               Team
             </button>
             <button className="button" onClick={() => setDialog('interfaces')} title="Interfaces and specs (I)">

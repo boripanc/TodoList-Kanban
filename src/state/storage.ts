@@ -1,7 +1,8 @@
-import type { AppState } from '../types'
+import type { AppState, Board, TeamMember } from '../types'
 import { createId } from '../lib/id'
 import { todayISO } from '../lib/dates'
 import { withoutMessageFields } from '../lib/interfaces'
+import { mergeMembers, remapIds } from '../lib/teams'
 import { initialState, reducer, type Action } from './reducer'
 import { templateColumns, templateLabels, type BoardTemplate } from './templates'
 
@@ -12,7 +13,10 @@ export function isAppState(value: unknown): value is AppState {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
   return (
-    (v.version === 1 || v.version === 2 || v.version === 3 || v.version === 4 || v.version === 5 || v.version === 6 || v.version === 7) &&
+    typeof v.version === 'number' &&
+    Number.isInteger(v.version) &&
+    v.version >= 1 &&
+    v.version <= 9 &&
     Array.isArray(v.boardOrder) &&
     typeof v.boards === 'object' &&
     v.boards !== null &&
@@ -28,7 +32,10 @@ export function isAppState(value: unknown): value is AppState {
  * progress; boards before version 3 had no team and cards no assignees;
  * cards before version 4 had no start date, and before version 5 no estimate,
  * and before version 6 no interface spec. Specs before version 7 had source
- * and target message fields, whose text now lives in the notes.
+ * and target message fields, whose text now lives in the notes. Before
+ * version 9 each board had its own team; the teams of boards on this device
+ * become one team ("My team", people with the same name joined), and account
+ * boards get theirs from the server.
  */
 export function migrateState(state: AppState): AppState {
   const cards: AppState['cards'] = {}
@@ -43,9 +50,35 @@ export function migrateState(state: AppState): AppState {
       spec: card.spec ? withoutMessageFields(card.spec) : null,
     }
   }
+  if (state.teams) return { ...state, version: 9, cards }
+
+  // Version 8 and older: a team on each board.
+  type OldBoard = Board & { team?: TeamMember[] }
   const boards: AppState['boards'] = {}
-  for (const [id, board] of Object.entries(state.boards)) boards[id] = { ...board, team: board.team ?? [] }
-  return { ...state, version: 7, boards, cards }
+  const local = state.boardOrder.filter((id) => {
+    const board = state.boards[id] as OldBoard | undefined
+    return board && !board.cloud && (board.team?.length ?? 0) > 0
+  })
+  const merged = mergeMembers(local.map((id) => (state.boards[id] as OldBoard).team ?? []))
+  const teams: AppState['teams'] = {}
+  const teamId = 'my-team'
+  if (local.length > 0) {
+    const createdAt = Math.min(...local.map((id) => state.boards[id].createdAt))
+    teams[teamId] = { id: teamId, name: 'My team', members: merged.members, createdAt }
+  }
+  for (const [id, old] of Object.entries(state.boards)) {
+    const { team: _team, ...board } = old as OldBoard
+    const index = local.indexOf(id)
+    boards[id] = { ...board, teamId: index >= 0 ? teamId : null }
+    if (index < 0) continue
+    for (const columnId of board.columnIds) {
+      for (const cardId of state.columns[columnId]?.cardIds ?? []) {
+        const card = cards[cardId]
+        if (card?.assigneeIds.length) cards[cardId] = { ...card, assigneeIds: remapIds(card.assigneeIds, merged.maps[index]) }
+      }
+    }
+  }
+  return { ...state, version: 9, boards, teams, cards }
 }
 
 export function loadState(storage: Storage | undefined = globalThis.localStorage): AppState {
@@ -101,8 +134,10 @@ export function createSampleState(): AppState {
   const label = (name: string) => work.labels.find((l) => l.name === name)!.id
   const alex = createId()
   const sam = createId()
-  state = reducer(state, { type: 'team/add', boardId: work.id, member: { id: alex, name: 'Alex', color: '#0090ff', capacity: 3 } })
-  state = reducer(state, { type: 'team/add', boardId: work.id, member: { id: sam, name: 'Sam', color: '#d6409f', capacity: 0 } })
+  const team = createId()
+  state = reducer(state, { type: 'team/create', id: team, name: 'My team', cloud: false, boardId: work.id, now })
+  state = reducer(state, { type: 'member/add', teamId: team, member: { id: alex, name: 'Alex', color: '#0090ff', capacity: 3 } })
+  state = reducer(state, { type: 'member/add', teamId: team, member: { id: sam, name: 'Sam', color: '#d6409f', capacity: 0 } })
 
   const add = (columnId: string, title: string, patch: Parameters<typeof cardPatch>[0] = {}) => {
     const id = createId()

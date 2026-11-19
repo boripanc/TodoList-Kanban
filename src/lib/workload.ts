@@ -1,6 +1,7 @@
 import type { AppState, Card, TeamMember } from '../types'
 import { daysUntil } from './dates'
 import { isDoneColumn } from './done'
+import { boardMembers, teamBoardIds } from './teams'
 
 /** What workload needs to know about a card. */
 export interface Workable {
@@ -127,8 +128,15 @@ export function boardWorkItems(state: AppState, boardId: string): WorkItem<Card>
   })
 }
 
+/** Workload on one board, for its team's members. */
 export function boardWorkload(state: AppState, boardId: string, now: Date = new Date()): Workload<Card> {
-  return computeWorkload(state.boards[boardId]?.team ?? [], boardWorkItems(state, boardId), now)
+  return computeWorkload(boardMembers(state, state.boards[boardId]), boardWorkItems(state, boardId), now)
+}
+
+/** A team's workload: its members' cards on every one of its boards. */
+export function teamWorkload(state: AppState, teamId: string, now: Date = new Date()): Workload<Card> {
+  const items = teamBoardIds(state, teamId).flatMap((id) => boardWorkItems(state, id))
+  return computeWorkload(state.teams[teamId]?.members ?? [], items, now)
 }
 
 /** Initials for an avatar: the first letters of the first two words. */

@@ -1,7 +1,7 @@
 import type { AttachmentCategory } from '../lib/attachments'
 import type { Role } from '../types'
 import type { CredentialKind } from '../lib/credentials'
-import type { BoardDoc, BoardOps, BoardSummary } from './doc'
+import type { BoardDoc, BoardOps, BoardSummary, TeamRow, TeamSummary } from './doc'
 
 export interface CloudUser {
   id: string
@@ -160,6 +160,17 @@ export interface CloudApi {
   applyOps(boardId: string, ops: BoardOps): Promise<void>
   deleteBoard(boardId: string): Promise<void>
 
+  /**
+   * Teams the user can see: their own, and the teams of boards shared with
+   * them. Editors of any of a team's boards can change the team; only its
+   * owner deletes it.
+   */
+  listTeams(): Promise<TeamSummary[]>
+  /** Create a team (the user becomes its owner) or save changes to one. */
+  saveTeam(team: TeamRow): Promise<void>
+  /** Owner only. Its boards are left without a team, and their cards without assignees. */
+  deleteTeam(teamId: string): Promise<void>
+
   listMembers(boardId: string): Promise<Member[]>
   setMemberRole(boardId: string, userId: string, role: Exclude<Role, 'owner'>): Promise<void>
   removeMember(boardId: string, userId: string): Promise<void>
@@ -219,9 +230,13 @@ export interface CloudApi {
 
   /**
    * Listen for changes made elsewhere: `onBoard` when a board's content changes,
-   * `onMembership` when the user gains, loses or changes access to a board.
+   * `onMembership` when the user gains, loses or changes access to a board,
+   * `onTeam` when one of their teams changes.
    */
-  subscribe(userId: string, handlers: { onBoard: (boardId: string) => void; onMembership: () => void }): () => void
+  subscribe(
+    userId: string,
+    handlers: { onBoard: (boardId: string) => void; onMembership: () => void; onTeam: (teamId: string) => void },
+  ): () => void
 }
 
 export const roleName: Record<Role, string> = { owner: 'Owner', editor: 'Can edit', viewer: 'Can view' }

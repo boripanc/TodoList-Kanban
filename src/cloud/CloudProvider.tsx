@@ -6,6 +6,7 @@ import { CloudContext, type Cloud } from './context'
 import { CloudSync } from './sync'
 import { SignInPage } from '../components/Sharing'
 import { UnreachableError } from './serverApi'
+import { createId } from '../lib/id'
 
 const PENDING_JOIN_KEY = 'todolist-kanban/pending-join'
 
@@ -193,6 +194,7 @@ function CloudSession({ api, children }: { api: CloudApi; children: ReactNode })
           void sync.refreshAll().catch(reportError)
           void refreshInvites()
         }),
+      onTeam: () => later('teams', () => void sync.refreshTeams().catch(reportError)),
     })
     const onFocus = () => {
       if (document.visibilityState === 'visible') {
@@ -260,8 +262,25 @@ function CloudSession({ api, children }: { api: CloudApi; children: ReactNode })
         syncRef.current?.publish(action.id)
       },
       moveToAccount: (boardId) => {
-        dispatch({ type: 'board/setCloud', boardId, role: 'owner' })
+        // Its team on this device comes along as a copy in the account, with the same people.
+        const current = getState()
+        const team = current.boards[boardId]?.teamId ? current.teams[current.boards[boardId].teamId!] : undefined
+        let teamId: string | undefined
+        if (team && !team.cloud) {
+          teamId = createId()
+          dispatch({ type: 'team/create', id: teamId, name: team.name, members: team.members, cloud: true, now: Date.now() })
+          syncRef.current?.publishTeam(teamId)
+        }
+        dispatch({ type: 'board/setCloud', boardId, role: 'owner', teamId })
         syncRef.current?.publish(boardId)
+      },
+      createTeam: (action) => {
+        dispatch(action)
+        if (action.cloud) syncRef.current?.publishTeam(action.id)
+      },
+      deleteTeam: (teamId) => {
+        if (getState().teams[teamId]?.cloud) syncRef.current?.deleteTeam(teamId)
+        dispatch({ type: 'team/delete', teamId })
       },
       deleteBoard: (boardId) => {
         syncRef.current?.deleteBoard(boardId)
@@ -316,6 +335,7 @@ function CloudSession({ api, children }: { api: CloudApi; children: ReactNode })
     [
       api,
       user,
+      getState,
       invites,
       joinToken,
       error,

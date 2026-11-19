@@ -18,6 +18,7 @@ import { SortableContext, horizontalListSortingStrategy, sortableKeyboardCoordin
 import type { Board as BoardType, Card, CardFilter } from '../types'
 import { useStore } from '../state/context'
 import { findColumnOfCard } from '../state/reducer'
+import { boardMembers } from '../lib/teams'
 import { isFilterActive, matchesFilter } from '../lib/filter'
 import { todayISO } from '../lib/dates'
 import { createId } from '../lib/id'
@@ -36,6 +37,7 @@ type ActiveDrag = { type: 'card' | 'column'; id: string } | null
 
 export function Board({ board, filter, onOpenCard, readOnly = false }: BoardProps) {
   const { state, dispatch } = useStore()
+  const team = boardMembers(state, board)
   const [active, setActive] = useState<ActiveDrag>(null)
   const [addingColumn, setAddingColumn] = useState(false)
   const lastDragEnd = useRef(0)
@@ -195,7 +197,7 @@ export function Board({ board, filter, onOpenCard, readOnly = false }: BoardProp
                 filterActive={isFilterActive(filter)}
                 activeCardId={active?.type === 'card' ? active.id : undefined}
                 labels={board.labels}
-                team={board.team}
+                team={team}
                 onOpenCard={openCard}
                 readOnly={readOnly}
               />
@@ -242,7 +244,7 @@ export function Board({ board, filter, onOpenCard, readOnly = false }: BoardProp
       </main>
 
       <DragOverlay>
-        {activeCard && <CardView card={activeCard} labels={board.labels} team={board.team} overlay />}
+        {activeCard && <CardView card={activeCard} labels={board.labels} team={team} overlay />}
         {activeColumn && (
           <div className="column column-overlay">
             <header className="column-header">

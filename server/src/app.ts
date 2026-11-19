@@ -5,7 +5,7 @@ import { HTTPException } from 'hono/http-exception'
 import { streamSSE } from 'hono/streaming'
 import type { CardRow, ColumnRow } from '../../src/cloud/doc.ts'
 import { ATTACHMENT_MAX_BYTES } from '../../src/lib/attachments.ts'
-import { fail, requireRole, type Role, type User } from './access.ts'
+import { canEdit, fail, requireRole, requireTeamRole, type Role, type User } from './access.ts'
 import { API_KEY_PREFIX, hashPassword, hashToken, MIN_PASSWORD_LENGTH, newToken, verifyPassword } from './auth.ts'
 import type { Db, Queryable } from './db.ts'
 import type { EventHub } from './events.ts'
@@ -338,7 +338,7 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
     const boardId = c.req.param('id')
     await requireRole(db, boardId, c.get('user').id, ['owner', 'editor', 'viewer'])
     const [board, columns, cards] = await Promise.all([
-      db.query('select id, title, labels, team, created_at from kanban.boards where id = $1', [boardId]),
+      db.query('select id, title, labels, team_id, created_at from kanban.boards where id = $1', [boardId]),
       db.query('select id, board_id, position, title, wip_limit from kanban.columns where board_id = $1', [boardId]),
       db.query('select * from kanban.cards where board_id = $1', [boardId]),
     ])
@@ -432,10 +432,11 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
     const cards = v.arrOf(b.cards, (x) => v.cardRow(x, board.id))
     const userId = c.get('user').id
     await db.transaction(async (tx) => {
+      if (board.team_id) await requireTeamRole(tx, board.team_id, userId, canEdit)
       const { rows } = await tx.query(
-        `insert into kanban.boards (id, owner_id, title, labels, team, created_at) values ($1, $2, $3, $4, $5, $6)
+        `insert into kanban.boards (id, owner_id, title, labels, team_id, created_at) values ($1, $2, $3, $4, $5, $6)
          on conflict (id) do nothing returning id`,
-        [board.id, userId, board.title, JSON.stringify(board.labels), JSON.stringify(board.team ?? []), board.created_at],
+        [board.id, userId, board.title, JSON.stringify(board.labels), board.team_id ?? null, board.created_at],
       )
       if (!rows[0]) fail(409, 'A board with this id already exists')
       await tx.query("insert into kanban.board_members (board_id, user_id, role) values ($1, $2, 'owner')", [
@@ -454,13 +455,20 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
     await db.transaction(async (tx) => {
       await requireRole(tx, boardId, c.get('user').id, ['owner', 'editor'])
       if (ops.board) {
-        // Apps from before teams existed don't send the team; keep what is stored.
-        await tx.query('update kanban.boards set title = $2, labels = $3, team = coalesce($4, team) where id = $1', [
-          boardId,
-          ops.board.title,
-          JSON.stringify(ops.board.labels),
-          ops.board.team === undefined ? null : JSON.stringify(ops.board.team),
-        ])
+        // Joining a team needs the right to change that team.
+        const teamId = ops.board.team_id
+        if (teamId) {
+          const { rows } = await tx.query<{ team_id: string | null }>('select team_id from kanban.boards where id = $1', [
+            boardId,
+          ])
+          if (rows[0]?.team_id !== teamId) await requireTeamRole(tx, teamId, c.get('user').id, canEdit)
+        }
+        // Apps from before teams of their own existed don't send team_id; keep what is stored.
+        await tx.query(
+          `update kanban.boards set title = $2, labels = $3, team_id = case when $5::boolean then $4 else team_id end
+           where id = $1`,
+          [boardId, ops.board.title, JSON.stringify(ops.board.labels), teamId ?? null, teamId !== undefined],
+        )
       }
       // Columns exist before cards move into them; cards go before their columns.
       await upsertColumns(tx, boardId, ops.upsertColumns)
@@ -482,6 +490,36 @@ export function createApp({ db, events, secureCookies = false, publicUrl, creden
     const boardId = c.req.param('id')
     await requireRole(db, boardId, c.get('user').id, ['owner'])
     await db.query('delete from kanban.boards where id = $1', [boardId])
+    return c.json({ ok: true })
+  })
+
+  // --- Teams ---
+
+  app.get('/teams', async (c) => c.json(await k.teamRows(db, c.get('user'))))
+
+  // Create a team (the caller owns it) or save the whole team: its name and members.
+  app.put('/teams/:id', async (c) => {
+    const team = v.teamRow(await body(c), c.req.param('id'))
+    const userId = c.get('user').id
+    await db.transaction(async (tx) => {
+      const { rows } = await tx.query(
+        `insert into kanban.teams (id, owner_id, name, members, created_at) values ($1, $2, $3, $4, $5)
+         on conflict (id) do nothing returning id`,
+        [team.id, userId, team.name, JSON.stringify(team.members), team.created_at],
+      )
+      if (rows[0]) return
+      await requireTeamRole(tx, team.id, userId, canEdit)
+      await tx.query('update kanban.teams set name = $2, members = $3 where id = $1', [
+        team.id,
+        team.name,
+        JSON.stringify(team.members),
+      ])
+    })
+    return c.json({ ok: true })
+  })
+
+  app.delete('/teams/:id', async (c) => {
+    await k.deleteTeam(db, c.get('user'), c.req.param('id'))
     return c.json({ ok: true })
   })
 

@@ -383,6 +383,66 @@ describe('App', () => {
     expect(screen.getByRole('dialog', { name: 'Edit card: Plan next sprint' })).toBeInTheDocument()
   })
 
+  it('puts boards under a team and shows the team’s workload across all its boards', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    // The Personal board has no team yet: it joins the Work board's team.
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Current board' }), 'Personal')
+    await user.click(screen.getByRole('button', { name: 'Team' }))
+    let dialog = screen.getByRole('dialog', { name: 'Team and workload' })
+    expect(dialog).toHaveTextContent('This board has no team yet')
+    await user.selectOptions(within(dialog).getByLabelText('Team of “Personal”'), 'My team')
+    expect(dialog).toHaveTextContent('2 boards: Work, Personal')
+
+    // The team's workload covers both boards' open cards.
+    expect(within(dialog).getByRole('listitem', { name: 'Workload: Alex' })).toHaveTextContent('3 of 3 open')
+    expect(within(dialog).getByRole('listitem', { name: 'Workload: Unassigned' })).toHaveTextContent('5 open cards')
+    await user.click(within(dialog).getByRole('button', { name: 'This board' }))
+    expect(within(dialog).getByRole('listitem', { name: 'Workload: Unassigned' })).toHaveTextContent('3 open cards')
+    await user.click(within(dialog).getByRole('button', { name: 'All team boards' }))
+
+    // Renaming the team shows in the board list, where boards sit under their team.
+    const name = within(dialog).getByLabelText('Team name')
+    await user.clear(name)
+    await user.type(name, 'Home and work')
+    await user.tab()
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }))
+    const group = screen.getByRole('group', { name: 'Home and work' })
+    expect(within(group).getAllByRole('option').map((o) => o.textContent)).toEqual(['Work', 'Personal'])
+
+    // Cards on Personal can now be assigned to Sam, and count toward Sam's load.
+    await user.click(screen.getByRole('button', { name: 'Card: Morning run' }))
+    const card = screen.getByRole('dialog', { name: 'Edit card: Morning run' })
+    await user.click(within(card).getByRole('button', { name: /Sam/ }))
+    await user.click(within(card).getByRole('button', { name: 'Close' }))
+    await user.click(screen.getByRole('button', { name: 'Team' }))
+    dialog = screen.getByRole('dialog', { name: 'Team and workload' })
+    const sam = within(dialog).getByRole('listitem', { name: 'Workload: Sam' })
+    expect(sam).toHaveTextContent('2 open')
+    await user.click(within(sam).getByRole('button', { name: 'Show 2 open cards' }))
+    expect(sam).toHaveTextContent('Morning run Personal · Doing')
+    expect(sam).toHaveTextContent(/Plan next sprint Work · To do/)
+  })
+
+  it('starts a new team for a board', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Current board' }), 'Personal')
+    await user.click(screen.getByRole('button', { name: 'Team' }))
+    const dialog = screen.getByRole('dialog', { name: 'Team and workload' })
+    await user.selectOptions(within(dialog).getByLabelText('Team of “Personal”'), '+ New team…')
+    await user.type(within(dialog).getByLabelText('New team name'), 'Family')
+    await user.click(within(dialog).getByRole('button', { name: 'Create team' }))
+    expect(within(dialog).getByLabelText('Team of “Personal”')).toHaveDisplayValue('Family')
+    expect(dialog).toHaveTextContent('1 board: Personal')
+    await user.type(within(dialog).getByLabelText('New team member name'), 'Mum')
+    await user.click(within(dialog).getByRole('button', { name: 'Add to team' }))
+    expect(within(dialog).getByRole('listitem', { name: 'Workload: Mum' })).toBeInTheDocument()
+    // The other team's workload is one pick away.
+    await user.selectOptions(within(dialog).getByLabelText('Show workload of team'), 'My team')
+    expect(within(dialog).getByRole('listitem', { name: 'Workload: Alex' })).toBeInTheDocument()
+  })
+
   it('filters the board to one person from the workload view', async () => {
     const user = userEvent.setup()
     renderApp()
@@ -498,7 +558,7 @@ describe('storage', () => {
     )
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 1, cards }))
     const state = loadState()
-    expect(state.version).toBe(7)
+    expect(state.version).toBe(9)
     expect(Object.keys(state.cards)).toEqual(Object.keys(saved.cards))
     for (const card of Object.values(state.cards)) expect(card.progressLog).toEqual([])
   })
@@ -508,12 +568,45 @@ describe('storage', () => {
     const cards = Object.fromEntries(
       Object.entries(saved.cards).map(([id, { assigneeIds: _a, ...card }]) => [id, card]),
     )
-    const boards = Object.fromEntries(Object.entries(saved.boards).map(([id, { team: _t, ...board }]) => [id, board]))
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 2, boards, cards }))
+    const boards = Object.fromEntries(Object.entries(saved.boards).map(([id, { teamId: _t, ...board }]) => [id, board]))
+    const { teams: _teams, ...rest } = saved
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...rest, version: 2, boards, cards }))
     const state = loadState()
-    expect(state.version).toBe(7)
-    for (const board of Object.values(state.boards)) expect(board.team).toEqual([])
+    expect(state.version).toBe(9)
+    expect(state.teams).toEqual({})
+    for (const board of Object.values(state.boards)) expect(board.teamId).toBeNull()
     for (const card of Object.values(state.cards)) expect(card.assigneeIds).toEqual([])
+  })
+
+  it('joins the teams of boards saved with a team each into one team', () => {
+    const saved = createSampleState()
+    const [work, personal] = saved.boardOrder
+    const people = saved.teams[saved.boards[work].teamId!].members
+    const alex = people.find((m) => m.name === 'Alex')!
+    // Before version 9 each board had its own team; Personal had another Alex, with a bigger capacity.
+    const boards = {
+      [work]: { ...saved.boards[work], teamId: undefined, team: people },
+      [personal]: {
+        ...saved.boards[personal],
+        teamId: undefined,
+        team: [{ id: 'alex-2', name: 'alex', color: '#000000', capacity: 5 }],
+      },
+    }
+    const groceries = Object.values(saved.cards).find((c) => c.title === 'Buy groceries')!
+    const cards = { ...saved.cards, [groceries.id]: { ...groceries, assigneeIds: ['alex-2'] } }
+    const { teams: _teams, ...rest } = saved
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...rest, version: 8, boards, cards }))
+    const state = loadState()
+    const team = state.teams['my-team']
+    expect(team.name).toBe('My team')
+    expect(team.members.map((m) => [m.name, m.capacity])).toEqual([
+      ['Alex', 5],
+      ['Sam', 0],
+    ])
+    expect(state.boards[work].teamId).toBe('my-team')
+    expect(state.boards[personal].teamId).toBe('my-team')
+    expect(state.boards[work]).not.toHaveProperty('team')
+    expect(state.cards[groceries.id].assigneeIds).toEqual([alex.id])
   })
 
   it('upgrades cards saved before estimates existed', () => {
@@ -523,7 +616,7 @@ describe('storage', () => {
     )
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 4, cards }))
     const state = loadState()
-    expect(state.version).toBe(7)
+    expect(state.version).toBe(9)
     for (const card of Object.values(state.cards)) expect(card.estimateDays).toBeNull()
   })
 
@@ -532,7 +625,7 @@ describe('storage', () => {
     const cards = Object.fromEntries(Object.entries(saved.cards).map(([id, { spec: _s, ...card }]) => [id, card]))
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 5, cards }))
     const state = loadState()
-    expect(state.version).toBe(7)
+    expect(state.version).toBe(9)
     for (const card of Object.values(state.cards)) expect(card.spec).toBeNull()
   })
 
@@ -543,7 +636,7 @@ describe('storage', () => {
     const cards = { ...saved.cards, [id]: { ...card, spec: oldSpec } }
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 6, cards }))
     const state = loadState()
-    expect(state.version).toBe(7)
+    expect(state.version).toBe(9)
     expect(state.cards[id].spec).not.toHaveProperty('input')
     expect(state.cards[id].spec?.notes).toBe(
       'OAuth\n\nSource message:\nIDoc ORDERS05\n\nTarget message and mapping:\nMap to SalesOrder',
@@ -555,7 +648,7 @@ describe('storage', () => {
     const cards = Object.fromEntries(Object.entries(saved.cards).map(([id, { startDate: _s, ...card }]) => [id, card]))
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, version: 3, cards }))
     const state = loadState()
-    expect(state.version).toBe(7)
+    expect(state.version).toBe(9)
     for (const card of Object.values(state.cards)) expect(card.startDate).toBeNull()
   })
 })
@@ -689,6 +782,14 @@ describe('accounts and sharing', () => {
     expect(await screen.findByText('ana@example.com')).toBeInTheDocument()
     expect([...server.boards.values()].map((b) => b.title)).toEqual(['Work'])
     expect(server.cards.size).toBe(6)
+    // Its team comes along as a copy in the account, so the cards keep their assignees.
+    const [team] = [...server.teams.values()]
+    expect(team).toMatchObject({ name: 'My team' })
+    expect(team.members.map((m) => m.name)).toEqual(['Alex', 'Sam'])
+    expect([...server.boards.values()][0].team_id).toBe(team.id)
+    const assigned = [...server.cards.values()].flatMap((c) => c.assignee_ids ?? [])
+    expect(assigned.length).toBeGreaterThan(0)
+    for (const id of assigned) expect(team.members.map((m) => m.id)).toContain(id)
   })
 
   it('accepts an invitation and opens the shared board', async () => {
@@ -859,8 +960,9 @@ describe('accounts and sharing', () => {
     const { server, ana, boardId } = await serverWithTrip()
     const anaApi = server.client(ana)
     const doc = (await anaApi.fetchBoard(boardId))!
+    await anaApi.saveTeam({ id: 'crew', name: 'Crew', members: [{ id: 'kim', name: 'Kim', color: '#0090ff', capacity: 0 }], created_at: 0 })
     await anaApi.applyOps(boardId, {
-      board: { title: 'Trip', labels: doc.board.labels, team: [{ id: 'kim', name: 'Kim', color: '#0090ff', capacity: 0 }] },
+      board: { title: 'Trip', labels: doc.board.labels, team_id: 'crew' },
       upsertColumns: [],
       deleteColumnIds: [],
       upsertCards: [],
@@ -869,6 +971,7 @@ describe('accounts and sharing', () => {
     renderWithCloud(anaApi)
     const trip = await screen.findByRole('option', { name: 'Trip' })
     await user.selectOptions(screen.getByRole('combobox', { name: 'Current board' }), trip)
+    await screen.findByRole('group', { name: 'Crew' })
 
     act(() => server.requestAssignment(boardId, 'c1', ['Kim', 'Lee'], 'ana@example.com'))
     expect(await screen.findByText('1 assignment from MCP needs your approval.')).toBeInTheDocument()
@@ -881,7 +984,7 @@ describe('accounts and sharing', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Approve assignment for Pack bags' }))
     expect(await within(dialog).findByText('Nothing is waiting.')).toBeInTheDocument()
     expect(server.cards.get('c1')!.assignee_ids).toHaveLength(2)
-    expect(server.boards.get(boardId)!.team!.map((m) => m.name)).toEqual(['Kim', 'Lee'])
+    expect(server.teams.get('crew')!.members.map((m) => m.name)).toEqual(['Kim', 'Lee'])
     await user.click(within(dialog).getByRole('button', { name: 'Close' }))
     await waitFor(() => expect(screen.queryByText(/needs your approval/)).not.toBeInTheDocument())
     expect(screen.queryByText('⏳ Assignment pending')).not.toBeInTheDocument()

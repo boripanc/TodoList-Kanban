@@ -1,15 +1,16 @@
 import { useState } from 'react'
 import type { Board, Column, InterfaceSpec, MessageMode, Priority } from '../types'
 import { useStore } from '../state/context'
+import { boardMembers } from '../lib/teams'
 import { createId } from '../lib/id'
 import { todayISO } from '../lib/dates'
 import { dueFromEstimate, MAX_ESTIMATE_DAYS, needsDateRange, scheduleProblem } from '../lib/schedule'
 import { emptySpec, messageModes, modeName, specFields } from '../lib/interfaces'
 import { priorityLabel } from '../lib/priority'
-import { labelColors } from '../state/templates'
 import { Modal } from './Modal'
 import { NewLabelForm } from './LabelEditor'
 import { Avatar } from './Team'
+import { useAddToTeam } from './useAddToTeam'
 import { AdapterSelect } from './Interfaces'
 
 const priorities: Priority[] = ['none', 'low', 'medium', 'high', 'urgent']
@@ -26,6 +27,8 @@ function holdsInterfaces(board: Board, columns: Record<string, Column>, cards: R
 /** The popup for adding a card to a column, with its details filled in up front. */
 export function NewCardDialog({ board, column, onClose }: { board: Board; column: Column; onClose: () => void }) {
   const { state, dispatch } = useStore()
+  const team = boardMembers(state, board)
+  const addToTeam = useAddToTeam(board)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [labelIds, setLabelIds] = useState<string[]>([])
@@ -57,12 +60,7 @@ export function NewCardDialog({ board, column, onClose }: { board: Board; column
   const addPerson = () => {
     const name = person.trim()
     if (!name) return
-    const existing = board.team.find((m) => m.name.toLowerCase() === name.toLowerCase())
-    const id = existing?.id ?? createId()
-    if (!existing) {
-      const color = labelColors[board.team.length % labelColors.length]
-      dispatch({ type: 'team/add', boardId: board.id, member: { id, name, color, capacity: 0 } })
-    }
+    const id = addToTeam(name)
     setAssigneeIds((ids) => (ids.includes(id) ? ids : [...ids, id]))
     setPerson('')
   }
@@ -231,9 +229,9 @@ export function NewCardDialog({ board, column, onClose }: { board: Board; column
 
             <div className="field">
               <span>Assignees</span>
-              {board.team.length === 0 && <small className="muted">No team yet. Add someone below.</small>}
+              {team.length === 0 && <small className="muted">No team yet. Add someone below.</small>}
               <div className="assignee-toggles">
-                {board.team.map((member) => {
+                {team.map((member) => {
                   const on = assigneeIds.includes(member.id)
                   return (
                     <button

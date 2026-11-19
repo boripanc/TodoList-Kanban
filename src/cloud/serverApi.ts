@@ -120,6 +120,14 @@ export function createServerApi(base: string): CloudApi {
       await call('DELETE', `/boards/${enc(boardId)}`)
     },
 
+    listTeams: () => call('GET', '/teams'),
+    async saveTeam(team) {
+      await call('PUT', `/teams/${enc(team.id)}`, team)
+    },
+    async deleteTeam(teamId) {
+      await call('DELETE', `/teams/${enc(teamId)}`)
+    },
+
     listMembers: (boardId) => call<Member[]>('GET', `/boards/${enc(boardId)}/members`),
     async setMemberRole(boardId, userId, role) {
       await call('PATCH', `/boards/${enc(boardId)}/members/${enc(userId)}`, { role })
@@ -211,7 +219,7 @@ export function createServerApi(base: string): CloudApi {
       await call('DELETE', `/credentials/${enc(credentialId)}`)
     },
 
-    subscribe(_userId, { onBoard, onMembership }) {
+    subscribe(_userId, { onBoard, onMembership, onTeam }) {
       // The browser reconnects on its own; after a reconnect, catch up on anything missed.
       const source = new EventSource(`${root}/events`, { withCredentials: true })
       let connectedBefore = false
@@ -221,9 +229,10 @@ export function createServerApi(base: string): CloudApi {
       })
       source.onmessage = (message) => {
         try {
-          const event = JSON.parse(message.data as string) as { type: string; boardId?: string }
+          const event = JSON.parse(message.data as string) as { type: string; boardId?: string; teamId?: string }
           if (event.type === 'board' && event.boardId) onBoard(event.boardId)
           else if (event.type === 'member') onMembership()
+          else if (event.type === 'team' && event.teamId) onTeam(event.teamId)
         } catch {
           // Ignore anything that isn't an event.
         }
